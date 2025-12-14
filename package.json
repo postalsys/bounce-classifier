@@ -26,7 +26,7 @@
     "build": "node build.js",
     "format": "prettier --write .",
     "prepublishOnly": "npm run build",
-    "test": "node test/test.js"
+    "test": "node --test test/test.js"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0"
