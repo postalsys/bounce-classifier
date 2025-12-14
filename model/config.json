@@ -1,0 +1,7 @@
+{
+  "max_tokens": 5000,
+  "max_length": 100,
+  "embedding_dim": 64,
+  "num_labels": 16,
+  "validation_accuracy": 0.862697422504425
+}

@@ -1,0 +1,55 @@
+{
+  "name": "@postalsys/bounce-classifier",
+  "version": "1.0.0",
+  "description": "SMTP bounce message classifier using machine learning",
+  "author": "Andris Reinman",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./src/index.d.ts"
+    },
+    "./model/*": "./model/*"
+  },
+  "types": "./src/index.d.ts",
+  "files": [
+    "src",
+    "dist",
+    "model",
+    "!model/keras_model.h5"
+  ],
+  "scripts": {
+    "build": "node build.js",
+    "prepublishOnly": "npm run build",
+    "test": "node test/test.js"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/postalsys/bounce-classifier.git"
+  },
+  "keywords": [
+    "smtp",
+    "bounce",
+    "email",
+    "classifier",
+    "machine-learning",
+    "tensorflow"
+  ],
+  "homepage": "https://github.com/postalsys/bounce-classifier#readme",
+  "bugs": {
+    "url": "https://github.com/postalsys/bounce-classifier/issues"
+  }
+}

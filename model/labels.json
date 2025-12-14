@@ -1,0 +1,38 @@
+{
+  "label_to_id": {
+    "auth_failure": 0,
+    "domain_blacklisted": 1,
+    "geo_blocked": 2,
+    "greylisting": 3,
+    "invalid_address": 4,
+    "ip_blacklisted": 5,
+    "mailbox_disabled": 6,
+    "mailbox_full": 7,
+    "policy_blocked": 8,
+    "rate_limited": 9,
+    "relay_denied": 10,
+    "server_error": 11,
+    "spam_blocked": 12,
+    "unknown": 13,
+    "user_unknown": 14,
+    "virus_detected": 15
+  },
+  "id_to_label": {
+    "0": "auth_failure",
+    "1": "domain_blacklisted",
+    "2": "geo_blocked",
+    "3": "greylisting",
+    "4": "invalid_address",
+    "5": "ip_blacklisted",
+    "6": "mailbox_disabled",
+    "7": "mailbox_full",
+    "8": "policy_blocked",
+    "9": "rate_limited",
+    "10": "relay_denied",
+    "11": "server_error",
+    "12": "spam_blocked",
+    "13": "unknown",
+    "14": "user_unknown",
+    "15": "virus_detected"
+  }
+}

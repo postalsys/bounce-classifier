@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMTP Bounce Classifier</title>
+    <script src="vendor/tailwind.js"></script>
+    <script src="vendor/tf.min.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-2xl mx-auto p-6">
+        <h1 class="text-2xl font-bold text-gray-900 mb-1">SMTP Bounce Classifier</h1>
+        <p class="text-gray-500 mb-6">Classify SMTP bounce messages using machine learning - runs entirely in your browser</p>
+
+        <div id="status" class="hidden mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg"></div>
+
+        <div class="mb-4">
+            <label for="message" class="block text-sm font-medium text-gray-700 mb-2">Enter SMTP bounce message:</label>
+            <textarea id="message"
+                class="w-full h-32 px-4 py-3 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"
+                placeholder="e.g., 550 5.1.1 The email account that you tried to reach does not exist."></textarea>
+        </div>
+
+        <button id="classify-btn" disabled
+            class="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors">
+            Classify
+        </button>
+
+        <div id="result" class="hidden mt-6 p-5 bg-white rounded-lg shadow-sm border border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Classification Result</h2>
+            <div id="result-content"></div>
+        </div>
+
+        <div class="mt-6 p-4 bg-white rounded-lg border border-gray-200">
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Try these examples:</h3>
+            <div class="flex flex-wrap gap-2">
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="550 5.1.1 The email account that you tried to reach does not exist.">User Unknown</button>
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="552 5.2.2 The email account that you tried to reach is over quota.">Mailbox Full</button>
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="421 4.7.0 Try again later, closing connection.">Greylisting</button>
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="550 5.7.1 Service unavailable, IP blocked by Spamhaus ZEN">IP Blacklisted</button>
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="550 5.7.1 Unauthenticated email from example.com is not accepted due to domain's DMARC policy.">Auth Failure</button>
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="421 4.7.28 Our system has detected an unusual rate of unsolicited mail originating from your IP address. Try again in 30 minutes.">Rate Limited</button>
+                <button class="example-btn px-3 py-2 text-xs bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 transition-colors" data-message="552 5.7.0 Our system detected an illegal attachment on your message.">Virus Detected</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Configuration
+        const MODEL_PATH = '../model';
+        const MAX_LENGTH = 100;
+        const CODE_FALLBACK_THRESHOLD = 0.5;
+
+        // SMTP Code Maps
+        const SMTP_CODE_MAP = {
+            '5.1.1': 'user_unknown', '5.1.2': 'invalid_address', '5.1.3': 'invalid_address',
+            '5.1.6': 'invalid_address', '4.1.1': 'user_unknown', '5.2.0': 'user_unknown',
+            '5.2.1': 'mailbox_disabled', '5.2.2': 'mailbox_full', '5.2.3': 'rate_limited',
+            '4.2.0': 'greylisting', '4.2.1': 'rate_limited', '4.2.2': 'mailbox_full',
+            '5.3.0': 'server_error', '5.3.1': 'server_error', '5.3.2': 'server_error',
+            '4.3.0': 'server_error', '4.3.1': 'server_error', '4.3.2': 'server_error',
+            '5.4.1': 'user_unknown', '5.4.4': 'server_error', '4.4.1': 'server_error',
+            '4.4.2': 'server_error', '5.5.0': 'user_unknown', '5.5.1': 'invalid_address',
+            '5.5.2': 'invalid_address', '5.6.1': 'policy_blocked', '5.6.2': 'policy_blocked',
+            '5.7.0': 'virus_detected', '5.7.1': 'policy_blocked', '5.7.2': 'relay_denied',
+            '5.7.8': 'auth_failure', '5.7.9': 'auth_failure', '5.7.23': 'auth_failure',
+            '5.7.25': 'auth_failure', '5.7.26': 'auth_failure', '4.7.0': 'rate_limited',
+            '4.7.1': 'rate_limited', '4.7.3': 'rate_limited', '4.7.28': 'rate_limited',
+            '4.7.32': 'rate_limited', '4.7.650': 'rate_limited', '4.7.651': 'rate_limited',
+            '5.2.121': 'rate_limited', '5.2.122': 'rate_limited'
+        };
+
+        const SMTP_MAIN_CODE_MAP = {
+            '421': 'greylisting', '450': 'greylisting', '451': 'server_error',
+            '452': 'server_error', '500': 'invalid_address', '501': 'invalid_address',
+            '502': 'server_error', '503': 'server_error', '504': 'server_error',
+            '550': 'user_unknown', '551': 'relay_denied', '552': 'mailbox_full',
+            '553': 'invalid_address', '554': 'policy_blocked', '571': 'spam_blocked'
+        };
+
+        const ACTION_MAP = {
+            user_unknown: 'remove', invalid_address: 'remove', mailbox_disabled: 'remove',
+            greylisting: 'retry', rate_limited: 'retry', server_error: 'retry', mailbox_full: 'retry',
+            ip_blacklisted: 'retry_different_ip', domain_blacklisted: 'fix_configuration',
+            auth_failure: 'fix_configuration', spam_blocked: 'review', policy_blocked: 'review',
+            virus_detected: 'remove_content', geo_blocked: 'retry_different_ip',
+            relay_denied: 'fix_configuration', unknown: 'review'
+        };
+
+        const ACTION_STYLES = {
+            remove: 'bg-red-100 text-red-800',
+            retry: 'bg-yellow-100 text-yellow-800',
+            retry_different_ip: 'bg-orange-100 text-orange-800',
+            fix_configuration: 'bg-purple-100 text-purple-800',
+            review: 'bg-blue-100 text-blue-800',
+            remove_content: 'bg-pink-100 text-pink-800'
+        };
+
+        // Retry timing patterns
+        const RETRY_PATTERNS = [
+            { pattern: /try\s+again\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+            { pattern: /retry\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+            { pattern: /wait\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+            { pattern: /greylisted?\s+(?:for\s+)?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+            { pattern: /come\s+back\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+            { pattern: /after\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+        ];
+
+        // Blocklist patterns
+        const BLOCKLIST_PATTERNS = [
+            { pattern: /spamhaus\.org/i, name: 'Spamhaus', type: 'ip' },
+            { pattern: /\bsbl\b/i, name: 'Spamhaus SBL', type: 'ip' },
+            { pattern: /\bxbl\b/i, name: 'Spamhaus XBL', type: 'ip' },
+            { pattern: /\bpbl\b/i, name: 'Spamhaus PBL', type: 'ip' },
+            { pattern: /\bdbl\.spamhaus/i, name: 'Spamhaus DBL', type: 'domain' },
+            { pattern: /\bzen\.spamhaus/i, name: 'Spamhaus ZEN', type: 'ip' },
+            { pattern: /barracuda/i, name: 'Barracuda', type: 'ip' },
+            { pattern: /sorbs\.net/i, name: 'SORBS', type: 'ip' },
+            { pattern: /spamcop\.net/i, name: 'SpamCop', type: 'ip' },
+            { pattern: /uribl\.com/i, name: 'URIBL', type: 'uri' },
+            { pattern: /cloudmark/i, name: 'Cloudmark', type: 'ip' },
+            { pattern: /proofpoint/i, name: 'Proofpoint', type: 'ip' },
+            { pattern: /mimecast/i, name: 'Mimecast', type: 'ip' },
+            { pattern: /\brbl\b/i, name: 'RBL', type: 'ip' },
+            { pattern: /\bdnsbl\b/i, name: 'DNSBL', type: 'ip' },
+            { pattern: /blacklist/i, name: 'Blocklist', type: 'ip' },
+            { pattern: /blocklist/i, name: 'Blocklist', type: 'ip' }
+        ];
+
+        // State
+        let model = null;
+        let vocabMap = null;
+        let labels = null;
+
+        // DOM elements
+        const statusEl = document.getElementById('status');
+        const messageEl = document.getElementById('message');
+        const classifyBtn = document.getElementById('classify-btn');
+        const resultEl = document.getElementById('result');
+        const resultContentEl = document.getElementById('result-content');
+
+        // Helper functions
+        function extractSmtpCodes(message) {
+            const result = { mainCode: null, extendedCode: null };
+            const mainMatch = message.match(/^(\d{3})[\s\-]/);
+            if (mainMatch) result.mainCode = mainMatch[1];
+            const extMatch = message.match(/\b([245])\.(\d{1,3})\.(\d{1,3})\b/);
+            if (extMatch) result.extendedCode = `${extMatch[1]}.${extMatch[2]}.${extMatch[3]}`;
+            return result;
+        }
+
+        // Text-based pattern fallbacks
+        const TEXT_PATTERN_FALLBACKS = [
+            { pattern: /doesn't have a .* account/i, label: 'user_unknown' },
+            { pattern: /user doesn't have .* account/i, label: 'user_unknown' },
+            { pattern: /not a valid recipient/i, label: 'user_unknown' },
+            { pattern: /no such user/i, label: 'user_unknown' },
+            { pattern: /user unknown/i, label: 'user_unknown' },
+            { pattern: /mailbox not found/i, label: 'user_unknown' },
+            { pattern: /recipient rejected/i, label: 'user_unknown' },
+            { pattern: /sender is unauthenticated/i, label: 'auth_failure' },
+            { pattern: /requires .* authenticate/i, label: 'auth_failure' },
+        ];
+
+        function getTextBasedFallback(message) {
+            for (const { pattern, label } of TEXT_PATTERN_FALLBACKS) {
+                if (pattern.test(message)) {
+                    return label;
+                }
+            }
+            return null;
+        }
+
+        function getCodeBasedFallback(message) {
+            // First try text-based patterns (more specific)
+            const textFallback = getTextBasedFallback(message);
+            if (textFallback) return textFallback;
+
+            // Then try SMTP codes
+            const codes = extractSmtpCodes(message);
+            if (codes.extendedCode && SMTP_CODE_MAP[codes.extendedCode]) {
+                return SMTP_CODE_MAP[codes.extendedCode];
+            }
+            if (codes.mainCode && SMTP_MAIN_CODE_MAP[codes.mainCode]) {
+                return SMTP_MAIN_CODE_MAP[codes.mainCode];
+            }
+            return null;
+        }
+
+        function toSeconds(value, unit) {
+            const num = parseInt(value, 10);
+            const u = unit.toLowerCase();
+            if (u.startsWith('sec') || u === 's') return num;
+            if (u.startsWith('min') || u === 'm') return num * 60;
+            if (u.startsWith('hour') || u === 'hr' || u === 'h') return num * 3600;
+            return num;
+        }
+
+        function extractRetryTiming(message) {
+            for (const { pattern, unit } of RETRY_PATTERNS) {
+                const match = message.match(pattern);
+                if (match && match[1]) {
+                    const seconds = toSeconds(match[1], match[unit] || 'seconds');
+                    if (seconds >= 1 && seconds <= 86400) {
+                        return seconds;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function formatRetryTime(seconds) {
+            if (seconds < 60) return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+            if (seconds < 3600) {
+                const mins = Math.floor(seconds / 60);
+                return `${mins} minute${mins !== 1 ? 's' : ''}`;
+            }
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            if (mins === 0) return `${hours} hour${hours !== 1 ? 's' : ''}`;
+            return `${hours}h ${mins}m`;
+        }
+
+        function identifyBlocklist(message) {
+            const found = [];
+            for (const { pattern, name, type } of BLOCKLIST_PATTERNS) {
+                if (pattern.test(message)) {
+                    if (!found.find(b => b.name === name)) {
+                        found.push({ name, type });
+                    }
+                }
+            }
+            if (found.length === 0) return null;
+            const specific = found.filter(b => !['RBL', 'DNSBL', 'Blocklist'].includes(b.name));
+            if (specific.length > 0) {
+                return specific.length === 1 ? specific[0] : { lists: specific };
+            }
+            return found[0];
+        }
+
+        function preprocessText(text) {
+            return text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function tokenize(text) {
+            const processed = preprocessText(text);
+            const words = processed.split(' ');
+            const tokens = new Array(MAX_LENGTH).fill(0);
+            for (let i = 0; i < Math.min(words.length, MAX_LENGTH); i++) {
+                const word = words[i];
+                if (vocabMap.has(word)) {
+                    tokens[i] = vocabMap.get(word);
+                } else {
+                    tokens[i] = 1;
+                }
+            }
+            return tokens;
+        }
+
+        // Initialize
+        async function initialize() {
+            try {
+                const vocabResponse = await fetch(`${MODEL_PATH}/vocab.json`);
+                const vocabData = await vocabResponse.json();
+                vocabMap = new Map();
+                vocabData.forEach((word, index) => vocabMap.set(word, index));
+
+                const labelsResponse = await fetch(`${MODEL_PATH}/labels.json`);
+                labels = await labelsResponse.json();
+
+                model = await tf.loadLayersModel(`${MODEL_PATH}/model.json`);
+
+                classifyBtn.disabled = false;
+            } catch (error) {
+                statusEl.textContent = `Error loading model: ${error.message}`;
+                statusEl.classList.remove('hidden');
+                console.error(error);
+            }
+        }
+
+        // Classify
+        async function classify(message) {
+            const tokens = tokenize(message);
+            const inputTensor = tf.tensor2d([tokens], [1, MAX_LENGTH], 'int32');
+            const prediction = model.predict(inputTensor);
+            const scores = await prediction.data();
+
+            inputTensor.dispose();
+            prediction.dispose();
+
+            let maxScore = 0;
+            let maxIndex = 0;
+            const allScores = {};
+
+            for (let i = 0; i < scores.length; i++) {
+                const labelName = labels.id_to_label[i];
+                allScores[labelName] = scores[i];
+                if (scores[i] > maxScore) {
+                    maxScore = scores[i];
+                    maxIndex = i;
+                }
+            }
+
+            let label = labels.id_to_label[maxIndex];
+            let usedFallback = false;
+
+            if (maxScore < CODE_FALLBACK_THRESHOLD) {
+                const fallbackLabel = getCodeBasedFallback(message);
+                if (fallbackLabel) {
+                    label = fallbackLabel;
+                    usedFallback = true;
+                }
+            }
+
+            const result = {
+                label,
+                confidence: maxScore,
+                action: ACTION_MAP[label] || 'review',
+                scores: allScores,
+                smtpCodes: extractSmtpCodes(message)
+            };
+
+            if (usedFallback) result.usedFallback = true;
+
+            const retryAfter = extractRetryTiming(message);
+            if (retryAfter !== null) result.retryAfter = retryAfter;
+
+            const blocklist = identifyBlocklist(message);
+            if (blocklist !== null) result.blocklist = blocklist;
+
+            return result;
+        }
+
+        // Display result
+        function displayResult(result) {
+            const confidencePercent = (result.confidence * 100).toFixed(1);
+            const sortedScores = Object.entries(result.scores).sort((a, b) => b[1] - a[1]);
+            const actionStyle = ACTION_STYLES[result.action] || 'bg-gray-100 text-gray-800';
+
+            // Build badges
+            const badges = [];
+
+            if (result.smtpCodes.mainCode || result.smtpCodes.extendedCode) {
+                const codes = [];
+                if (result.smtpCodes.mainCode) codes.push(result.smtpCodes.mainCode);
+                if (result.smtpCodes.extendedCode) codes.push(result.smtpCodes.extendedCode);
+                badges.push(`<span class="inline-block px-2 py-1 text-xs rounded bg-sky-100 text-sky-800">SMTP: ${codes.join(' / ')}</span>`);
+            }
+
+            if (result.retryAfter) {
+                badges.push(`<span class="inline-block px-2 py-1 text-xs rounded bg-amber-100 text-amber-800">Retry after: ${formatRetryTime(result.retryAfter)}</span>`);
+            }
+
+            if (result.blocklist) {
+                const blName = result.blocklist.lists
+                    ? result.blocklist.lists.map(b => b.name).join(', ')
+                    : `${result.blocklist.name} (${result.blocklist.type})`;
+                badges.push(`<span class="inline-block px-2 py-1 text-xs rounded bg-red-100 text-red-800">Blocklist: ${blName}</span>`);
+            }
+
+            resultContentEl.innerHTML = `
+                <div class="inline-block px-4 py-2 rounded-full text-sm font-semibold mb-4 ${actionStyle}">
+                    ${result.label.replace(/_/g, ' ')}
+                </div>
+
+                <div class="flex justify-between py-2 border-b border-gray-100">
+                    <span class="text-gray-500 text-sm">Recommended Action</span>
+                    <span class="font-medium text-gray-900 text-sm">${result.action.replace(/_/g, ' ')}</span>
+                </div>
+
+                ${badges.length > 0 ? `<div class="flex flex-wrap gap-2 mt-4">${badges.join('')}</div>` : ''}
+
+                <div class="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                    <button onclick="toggleDetails()" class="w-full flex justify-between items-center px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
+                        <span class="text-sm font-medium text-gray-700">Details</span>
+                        <svg id="details-chevron" class="w-4 h-4 text-gray-500 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </button>
+                    <div id="details-content" class="hidden px-4 py-3 border-t border-gray-200">
+                        <div class="flex justify-between py-2">
+                            <span class="text-gray-500 text-sm">Confidence</span>
+                            <div class="flex items-center gap-2">
+                                <div class="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                    <div class="h-full bg-green-500 rounded-full" style="width: ${confidencePercent}%"></div>
+                                </div>
+                                <span class="text-sm font-medium text-gray-900">${confidencePercent}%</span>
+                            </div>
+                        </div>
+
+                        ${result.usedFallback ? `
+                        <div class="flex justify-between py-2">
+                            <span class="text-gray-500 text-sm">Note</span>
+                            <span class="text-sm text-amber-600">Used SMTP code fallback</span>
+                        </div>
+                        ` : ''}
+
+                        <div class="mt-3 pt-3 border-t border-gray-100">
+                            <div class="text-xs font-medium text-gray-500 mb-2">All Scores</div>
+                            <div class="grid grid-cols-2 gap-1">
+                                ${sortedScores.map(([label, score]) => `
+                                    <div class="flex justify-between px-2 py-1 text-xs rounded ${label === result.label ? 'bg-green-50 font-medium' : 'bg-gray-50'}">
+                                        <span class="text-gray-700">${label.replace(/_/g, ' ')}</span>
+                                        <span class="text-gray-500">${(score * 100).toFixed(1)}%</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            resultEl.classList.remove('hidden');
+        }
+
+        // Toggle details accordion
+        window.toggleDetails = function() {
+            const content = document.getElementById('details-content');
+            const chevron = document.getElementById('details-chevron');
+            content.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180');
+        };
+
+        // Event handlers
+        classifyBtn.addEventListener('click', async () => {
+            const message = messageEl.value.trim();
+            if (!message) {
+                alert('Please enter a bounce message');
+                return;
+            }
+
+            classifyBtn.disabled = true;
+            classifyBtn.textContent = 'Classifying...';
+
+            try {
+                const result = await classify(message);
+                displayResult(result);
+            } catch (error) {
+                resultContentEl.innerHTML = `<div class="p-4 bg-red-50 text-red-700 rounded-lg">Error: ${error.message}</div>`;
+                resultEl.classList.remove('hidden');
+            } finally {
+                classifyBtn.disabled = false;
+                classifyBtn.textContent = 'Classify';
+            }
+        });
+
+        // Example buttons
+        document.querySelectorAll('.example-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                messageEl.value = btn.dataset.message;
+            });
+        });
+
+        // Ctrl+Enter to submit
+        messageEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                classifyBtn.click();
+            }
+        });
+
+        // Initialize when TensorFlow.js is ready
+        function waitForTF() {
+            if (typeof tf !== 'undefined' && tf.loadLayersModel) {
+                initialize();
+            } else {
+                setTimeout(waitForTF, 50);
+            }
+        }
+        waitForTF();
+    </script>
+</body>
+</html>

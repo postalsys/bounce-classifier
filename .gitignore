@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output (regenerated with npm run build)
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Keras model (only needed for Python, not JS runtime)
+model/keras_model.h5
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
