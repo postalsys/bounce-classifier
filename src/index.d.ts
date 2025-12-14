@@ -214,6 +214,13 @@ export function extractSmtpCodes(message: string): SmtpCodes;
 export function getCodeBasedFallback(message: string): BounceLabel | null;
 
 /**
+ * Get fallback classification based on text patterns
+ * @param message - The bounce message
+ * @returns Fallback label or null if no match
+ */
+export function getTextBasedFallback(message: string): BounceLabel | null;
+
+/**
  * Default export with all functions and constants
  */
 declare const bounceClassifier: {
@@ -228,6 +235,7 @@ declare const bounceClassifier: {
   getAction: typeof getAction;
   extractSmtpCodes: typeof extractSmtpCodes;
   getCodeBasedFallback: typeof getCodeBasedFallback;
+  getTextBasedFallback: typeof getTextBasedFallback;
   ACTION_MAP: typeof ACTION_MAP;
   BLOCKLIST_PATTERNS: typeof BLOCKLIST_PATTERNS;
   SMTP_CODE_MAP: typeof SMTP_CODE_MAP;

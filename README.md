@@ -105,6 +105,14 @@ const results = await classifyBatch([
 ]);
 ```
 
+**Why use batch instead of a loop?** Batching is significantly faster than calling `classify()` in a loop because:
+
+- **Single TensorFlow operation**: One `model.predict()` call instead of N separate calls
+- **Reduced overhead**: One tensor allocation/disposal instead of N
+- **Parallelization**: TensorFlow processes all inputs simultaneously using GPU/SIMD
+
+For 100 messages, batching can be 10-50x faster depending on environment. The batch API has a maximum size of 1,000 messages per call.
+
 ### `getLabels(): Promise<string[]>`
 
 Get list of all possible classification labels.

@@ -513,11 +513,11 @@ describe("Classifier", () => {
       );
       await assert.rejects(
         async () => classify(123),
-        /must be a non-empty string/,
+        /must be a string, got number/,
       );
       await assert.rejects(
         async () => classify(""),
-        /must be a non-empty string/,
+        /must not be empty or whitespace-only/,
       );
     });
 
@@ -695,7 +695,9 @@ describe("Classifier", () => {
     });
 
     it("should classify 551 not local as invalid_address", async () => {
-      const result = await classify("551 User not local; please try forwarding");
+      const result = await classify(
+        "551 User not local; please try forwarding",
+      );
       assert.strictEqual(
         result.label,
         "invalid_address",

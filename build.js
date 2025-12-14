@@ -3,7 +3,7 @@
  */
 
 import { build } from "esbuild";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir } from "fs/promises";
 
 async function main() {
   // Ensure dist directory exists

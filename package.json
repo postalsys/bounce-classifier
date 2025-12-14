@@ -25,6 +25,7 @@
   "scripts": {
     "build": "node build.js",
     "format": "prettier --write .",
+    "lint": "eslint .",
     "prepublishOnly": "npm run build",
     "test": "node --test test/test.js"
   },
@@ -33,6 +34,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.24.2",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.7.4"
   },
   "engines": {

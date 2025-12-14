@@ -11,6 +11,8 @@ import { createRequire } from "module";
 
 // Configuration
 const MAX_LENGTH = 100;
+const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
+const MAX_BATCH_SIZE = 1000; // Max messages per batch
 
 // Detect environment
 const isBrowser =
@@ -180,7 +182,7 @@ export const CODE_FALLBACK_THRESHOLD = 0.5;
  */
 export function extractSmtpCodes(message) {
   const result = { mainCode: null, extendedCode: null };
-  const mainMatch = message.match(/^(\d{3})[\s\-]/);
+  const mainMatch = message.match(/^(\d{3})[\s-]/);
   if (mainMatch) result.mainCode = mainMatch[1];
   const extMatch = message.match(/\b([245])\.(\d{1,3})\.(\d{1,3})\b/);
   if (extMatch)
@@ -189,16 +191,17 @@ export function extractSmtpCodes(message) {
 }
 
 // Text-based pattern fallbacks for common patterns
+// Note: .{0,100}? limits match length to prevent performance issues on long strings
 const TEXT_PATTERN_FALLBACKS = [
-  { pattern: /doesn't have a .* account/i, label: "user_unknown" },
-  { pattern: /user doesn't have .* account/i, label: "user_unknown" },
+  { pattern: /doesn't have a .{0,50}? account/i, label: "user_unknown" },
+  { pattern: /user doesn't have .{0,50}? account/i, label: "user_unknown" },
   { pattern: /not a valid recipient/i, label: "user_unknown" },
   { pattern: /no such user/i, label: "user_unknown" },
   { pattern: /user unknown/i, label: "user_unknown" },
   { pattern: /mailbox not found/i, label: "user_unknown" },
   { pattern: /recipient rejected/i, label: "user_unknown" },
   { pattern: /sender is unauthenticated/i, label: "auth_failure" },
-  { pattern: /requires .* authenticate/i, label: "auth_failure" },
+  { pattern: /requires .{0,50}? authenticate/i, label: "auth_failure" },
 ];
 
 /**
@@ -235,6 +238,7 @@ export function getCodeBasedFallback(message) {
 }
 
 // Retry timing patterns
+// Note: .{0,50}? limits match length to prevent performance issues on long strings
 const RETRY_PATTERNS = [
   {
     pattern: /try\s+again\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
@@ -261,10 +265,13 @@ const RETRY_PATTERNS = [
   { pattern: /after\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
   { pattern: /\b(\d+)\s*(second|minute|hour)s?\b/i, unit: 2 },
   {
-    pattern: /too\s+many.*?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+    pattern: /too\s+many.{0,50}?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
     unit: 2,
   },
-  { pattern: /greylist.*?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+  {
+    pattern: /greylist.{0,50}?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+    unit: 2,
+  },
 ];
 
 function toSeconds(value, unit) {
@@ -319,6 +326,34 @@ export function identifyBlocklist(message) {
  */
 export function getAction(category) {
   return ACTION_MAP[category] || "review";
+}
+
+/**
+ * Sanitize and validate input message
+ * @param {*} message - Input to validate
+ * @param {string} context - Context for error messages
+ * @returns {string} Sanitized message
+ */
+function sanitizeMessage(message, context = "Message") {
+  if (message === null || message === undefined) {
+    throw new Error(`${context} must be a non-empty string`);
+  }
+
+  if (typeof message !== "string") {
+    throw new Error(`${context} must be a string, got ${typeof message}`);
+  }
+
+  // Check for empty or whitespace-only strings
+  if (message.trim().length === 0) {
+    throw new Error(`${context} must not be empty or whitespace-only`);
+  }
+
+  // Truncate overly long messages to prevent performance issues
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    return message.substring(0, MAX_MESSAGE_LENGTH);
+  }
+
+  return message;
 }
 
 // Singleton state
@@ -471,37 +506,55 @@ export async function initialize(options = {}) {
   if (isInitialized) return;
   if (initPromise) return initPromise;
 
-  initPromise = (async () => {
-    modelBasePath = options.modelPath || (await getDefaultModelPath());
-
-    // Determine path joiner based on environment
-    const joinPath = isBrowser
-      ? (...parts) => parts.join("/")
-      : nodeRequire("path").join;
-
-    // Load vocabulary
-    const vocabPath = joinPath(modelBasePath, "vocab.json");
-    const vocabData = await loadJson(vocabPath);
-    vocabMap = new Map();
-    vocabData.forEach((word, index) => {
-      vocabMap.set(word, index);
-    });
-
-    // Load labels
-    const labelsPath = joinPath(modelBasePath, "labels.json");
-    labels = await loadJson(labelsPath);
-
-    // Load TensorFlow.js model
-    if (isBrowser) {
-      // Browser: use URL-based loading
-      model = await tf.loadLayersModel(`${modelBasePath}/model.json`);
-    } else {
-      // Node.js: use custom file system handler
-      const handler = new NodeFileSystem(modelBasePath);
-      model = await tf.loadLayersModel(handler);
+  // Validate modelPath option if provided
+  if (options.modelPath !== undefined) {
+    if (typeof options.modelPath !== "string") {
+      throw new Error(
+        `modelPath must be a string, got ${typeof options.modelPath}`,
+      );
     }
+    if (options.modelPath.trim() === "") {
+      throw new Error("modelPath must not be empty");
+    }
+  }
 
-    isInitialized = true;
+  initPromise = (async () => {
+    try {
+      modelBasePath = options.modelPath || (await getDefaultModelPath());
+
+      // Determine path joiner based on environment
+      const joinPath = isBrowser
+        ? (...parts) => parts.join("/")
+        : nodeRequire("path").join;
+
+      // Load vocabulary
+      const vocabPath = joinPath(modelBasePath, "vocab.json");
+      const vocabData = await loadJson(vocabPath);
+      vocabMap = new Map();
+      vocabData.forEach((word, index) => {
+        vocabMap.set(word, index);
+      });
+
+      // Load labels
+      const labelsPath = joinPath(modelBasePath, "labels.json");
+      labels = await loadJson(labelsPath);
+
+      // Load TensorFlow.js model
+      if (isBrowser) {
+        // Browser: use URL-based loading
+        model = await tf.loadLayersModel(`${modelBasePath}/model.json`);
+      } else {
+        // Node.js: use custom file system handler
+        const handler = new NodeFileSystem(modelBasePath);
+        model = await tf.loadLayersModel(handler);
+      }
+
+      isInitialized = true;
+    } catch (error) {
+      // Clear promise so next call can retry initialization
+      initPromise = null;
+      throw error;
+    }
   })();
 
   return initPromise;
@@ -515,9 +568,7 @@ export async function initialize(options = {}) {
 export async function classify(message) {
   await initialize();
 
-  if (!message || typeof message !== "string") {
-    throw new Error("Message must be a non-empty string");
-  }
+  message = sanitizeMessage(message);
 
   const tokens = tokenize(message);
   const inputTensor = tf.tensor2d([tokens], [1, MAX_LENGTH], "int32");
@@ -581,10 +632,25 @@ export async function classifyBatch(messages) {
     throw new Error("Messages must be an array");
   }
 
-  const tokenizedMessages = messages.map((msg) => tokenize(msg));
+  if (messages.length === 0) {
+    return [];
+  }
+
+  if (messages.length > MAX_BATCH_SIZE) {
+    throw new Error(
+      `Batch size ${messages.length} exceeds maximum of ${MAX_BATCH_SIZE}`,
+    );
+  }
+
+  // Validate and sanitize all messages before processing
+  const sanitizedMessages = messages.map((msg, index) =>
+    sanitizeMessage(msg, `Message at index ${index}`),
+  );
+
+  const tokenizedMessages = sanitizedMessages.map((msg) => tokenize(msg));
   const inputTensor = tf.tensor2d(
     tokenizedMessages,
-    [messages.length, MAX_LENGTH],
+    [sanitizedMessages.length, MAX_LENGTH],
     "int32",
   );
   const predictions = model.predict(inputTensor);
@@ -596,7 +662,7 @@ export async function classifyBatch(messages) {
   const results = [];
   const numLabels = Object.keys(labels.id_to_label).length;
 
-  for (let i = 0; i < messages.length; i++) {
+  for (let i = 0; i < sanitizedMessages.length; i++) {
     const offset = i * numLabels;
     let maxScore = 0;
     let maxIndex = 0;
@@ -616,7 +682,7 @@ export async function classifyBatch(messages) {
     let usedFallback = false;
 
     if (maxScore < CODE_FALLBACK_THRESHOLD) {
-      const fallbackLabel = getCodeBasedFallback(messages[i]);
+      const fallbackLabel = getCodeBasedFallback(sanitizedMessages[i]);
       if (fallbackLabel) {
         label = fallbackLabel;
         usedFallback = true;
@@ -632,10 +698,10 @@ export async function classifyBatch(messages) {
 
     if (usedFallback) result.usedFallback = true;
 
-    const retryAfter = extractRetryTiming(messages[i]);
+    const retryAfter = extractRetryTiming(sanitizedMessages[i]);
     if (retryAfter !== null) result.retryAfter = retryAfter;
 
-    const blocklist = identifyBlocklist(messages[i]);
+    const blocklist = identifyBlocklist(sanitizedMessages[i]);
     if (blocklist !== null) result.blocklist = blocklist;
 
     results.push(result);
@@ -674,6 +740,7 @@ export function reset() {
   isInitialized = false;
   initPromise = null;
   modelBasePath = null;
+  cachedModelPath = null;
 }
 
 // Default export
@@ -689,6 +756,7 @@ export default {
   getAction,
   extractSmtpCodes,
   getCodeBasedFallback,
+  getTextBasedFallback,
   ACTION_MAP,
   BLOCKLIST_PATTERNS,
   SMTP_CODE_MAP,
