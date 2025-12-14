@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/postalsys/bounce-classifier/compare/v1.1.0...v1.2.0) (2025-12-14)
+
+
+### Features
+
+* retrain model with expanded training data ([93779ef](https://github.com/postalsys/bounce-classifier/commit/93779ef187b545658f1101dd20a5b0c512042ae3))
+
 ## [1.1.0](https://github.com/postalsys/bounce-classifier/compare/v1.0.0...v1.1.0) (2025-12-14)
 
 
