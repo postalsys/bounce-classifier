@@ -43,10 +43,7 @@ main();
 
 ```html
 <script type="module">
-  import {
-    classify,
-    initialize,
-  } from "https://cdn.example.com/@postalsys/bounce-classifier/src/index.js";
+  import { classify, initialize } from "./src/index.js";
 
   // Specify model path for browser
   await initialize({ modelPath: "./model" });
@@ -56,7 +53,7 @@ main();
 </script>
 ```
 
-See the `example/` folder for a complete browser demo.
+See the `example/` folder for a complete standalone browser demo that works offline.
 
 ## API
 
@@ -198,7 +195,7 @@ npx serve ..
 - **Architecture**: Embedding + GlobalAveragePooling + Dense layers
 - **Vocabulary size**: 5,000 tokens
 - **Max sequence length**: 100 tokens
-- **Validation accuracy**: ~85%
+- **Validation accuracy**: ~95%
 - **Model size**: ~1.3 MB
 
 ## License
