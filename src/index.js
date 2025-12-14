@@ -7,6 +7,7 @@
  */
 
 import * as tf from "@tensorflow/tfjs";
+import { createRequire } from "module";
 
 // Configuration
 const MAX_LENGTH = 100;
@@ -18,6 +19,9 @@ const isNode =
   typeof process !== "undefined" &&
   process.versions != null &&
   process.versions.node != null;
+
+// Create require function for ESM compatibility (works in both ESM and CJS after bundling)
+const nodeRequire = isNode ? createRequire(import.meta.url) : null;
 
 // Action mapping based on bounce category
 export const ACTION_MAP = {
@@ -359,17 +363,17 @@ function tokenize(text) {
 /**
  * Load JSON file (works in both browser and Node.js)
  */
-async function loadJson(path) {
+async function loadJson(filePath) {
   if (isBrowser) {
-    const response = await fetch(path);
+    const response = await fetch(filePath);
     if (!response.ok) {
-      throw new Error(`Failed to fetch ${path}: ${response.status}`);
+      throw new Error(`Failed to fetch ${filePath}: ${response.status}`);
     }
     return response.json();
   } else {
-    // Node.js - dynamic import to avoid bundling issues
-    const { readFileSync } = await import("fs");
-    return JSON.parse(readFileSync(path, "utf8"));
+    // Node.js - use nodeRequire for pkg compatibility
+    const fs = nodeRequire("fs");
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
   }
 }
 
@@ -385,11 +389,12 @@ class NodeFileSystem {
   }
 
   async load() {
-    const { readFileSync } = await import("fs");
-    const { join } = await import("path");
+    // Use nodeRequire for pkg compatibility
+    const fs = nodeRequire("fs");
+    const path = nodeRequire("path");
 
-    const modelJsonPath = join(this.modelPath, "model.json");
-    const modelJSON = JSON.parse(readFileSync(modelJsonPath, "utf8"));
+    const modelJsonPath = path.join(this.modelPath, "model.json");
+    const modelJSON = JSON.parse(fs.readFileSync(modelJsonPath, "utf8"));
 
     const weightsManifest = modelJSON.weightsManifest;
     const weightSpecs = [];
@@ -400,8 +405,8 @@ class NodeFileSystem {
         weightSpecs.push(weight);
       }
       for (const filePath of group.paths) {
-        const fullPath = join(this.modelPath, filePath);
-        const buffer = readFileSync(fullPath);
+        const fullPath = path.join(this.modelPath, filePath);
+        const buffer = fs.readFileSync(fullPath);
         weightData.push(
           buffer.buffer.slice(
             buffer.byteOffset,
@@ -445,9 +450,9 @@ async function getDefaultModelPath() {
     return cachedModelPath;
   }
 
-  // Node.js - compute path relative to this module
-  const path = await import("path");
-  const url = await import("url");
+  // Node.js - use nodeRequire for pkg compatibility
+  const path = nodeRequire("path");
+  const url = nodeRequire("url");
 
   // import.meta.url gives us the URL of this module
   const __filename = url.fileURLToPath(import.meta.url);
@@ -472,7 +477,7 @@ export async function initialize(options = {}) {
     // Determine path joiner based on environment
     const joinPath = isBrowser
       ? (...parts) => parts.join("/")
-      : (await import("path")).join;
+      : nodeRequire("path").join;
 
     // Load vocabulary
     const vocabPath = joinPath(modelBasePath, "vocab.json");
