@@ -9,9 +9,9 @@
   "module": "./src/index.js",
   "exports": {
     ".": {
+      "types": "./src/index.d.ts",
       "import": "./src/index.js",
-      "require": "./dist/index.cjs",
-      "types": "./src/index.d.ts"
+      "require": "./dist/index.cjs"
     },
     "./model/*": "./model/*"
   },
