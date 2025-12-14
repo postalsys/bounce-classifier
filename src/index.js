@@ -372,8 +372,8 @@ async function loadJson(filePath) {
     return response.json();
   } else {
     // Node.js - use nodeRequire for pkg compatibility
-    const fs = nodeRequire("fs");
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const fs = nodeRequire("fs").promises;
+    return JSON.parse(await fs.readFile(filePath, "utf8"));
   }
 }
 
@@ -390,11 +390,11 @@ class NodeFileSystem {
 
   async load() {
     // Use nodeRequire for pkg compatibility
-    const fs = nodeRequire("fs");
+    const fs = nodeRequire("fs").promises;
     const path = nodeRequire("path");
 
     const modelJsonPath = path.join(this.modelPath, "model.json");
-    const modelJSON = JSON.parse(fs.readFileSync(modelJsonPath, "utf8"));
+    const modelJSON = JSON.parse(await fs.readFile(modelJsonPath, "utf8"));
 
     const weightsManifest = modelJSON.weightsManifest;
     const weightSpecs = [];
@@ -406,7 +406,7 @@ class NodeFileSystem {
       }
       for (const filePath of group.paths) {
         const fullPath = path.join(this.modelPath, filePath);
-        const buffer = fs.readFileSync(fullPath);
+        const buffer = await fs.readFile(fullPath);
         weightData.push(
           buffer.buffer.slice(
             buffer.byteOffset,
