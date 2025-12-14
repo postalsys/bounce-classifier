@@ -1,0 +1,5 @@
+CHANGELOG.md
+dist/
+node_modules/
+model/
+example/vendor/

@@ -10,105 +10,105 @@
  * Possible bounce classification labels
  */
 export type BounceLabel =
-    | 'auth_failure'
-    | 'domain_blacklisted'
-    | 'geo_blocked'
-    | 'greylisting'
-    | 'invalid_address'
-    | 'ip_blacklisted'
-    | 'mailbox_disabled'
-    | 'mailbox_full'
-    | 'policy_blocked'
-    | 'rate_limited'
-    | 'relay_denied'
-    | 'server_error'
-    | 'spam_blocked'
-    | 'unknown'
-    | 'user_unknown'
-    | 'virus_detected';
+  | "auth_failure"
+  | "domain_blacklisted"
+  | "geo_blocked"
+  | "greylisting"
+  | "invalid_address"
+  | "ip_blacklisted"
+  | "mailbox_disabled"
+  | "mailbox_full"
+  | "policy_blocked"
+  | "rate_limited"
+  | "relay_denied"
+  | "server_error"
+  | "spam_blocked"
+  | "unknown"
+  | "user_unknown"
+  | "virus_detected";
 
 /**
  * Recommended action based on bounce category
  */
 export type BounceAction =
-    | 'remove'             // Permanent failure - remove from list
-    | 'retry'              // Temporary failure - retry later
-    | 'retry_different_ip' // IP blocked - try different IP
-    | 'fix_configuration'  // Config issue - fix sender setup
-    | 'review'             // Needs manual review
-    | 'remove_content';    // Content issue - remove problematic content
+  | "remove" // Permanent failure - remove from list
+  | "retry" // Temporary failure - retry later
+  | "retry_different_ip" // IP blocked - try different IP
+  | "fix_configuration" // Config issue - fix sender setup
+  | "review" // Needs manual review
+  | "remove_content"; // Content issue - remove problematic content
 
 /**
  * Blocklist type
  */
-export type BlocklistType = 'ip' | 'domain' | 'uri';
+export type BlocklistType = "ip" | "domain" | "uri";
 
 /**
  * Single blocklist identification result
  */
 export interface BlocklistInfo {
-    /** Name of the blocklist (e.g., 'Spamhaus ZEN', 'Barracuda') */
-    name: string;
-    /** Type of blocklist */
-    type: BlocklistType;
+  /** Name of the blocklist (e.g., 'Spamhaus ZEN', 'Barracuda') */
+  name: string;
+  /** Type of blocklist */
+  type: BlocklistType;
 }
 
 /**
  * Multiple blocklists identification result
  */
 export interface MultipleBlocklistInfo {
-    /** Array of identified blocklists */
-    lists: BlocklistInfo[];
+  /** Array of identified blocklists */
+  lists: BlocklistInfo[];
 }
 
 /**
  * Blocklist pattern definition
  */
 export interface BlocklistPattern {
-    /** Regex pattern to match */
-    pattern: RegExp;
-    /** Name of the blocklist */
-    name: string;
-    /** Type of blocklist */
-    type: BlocklistType;
+  /** Regex pattern to match */
+  pattern: RegExp;
+  /** Name of the blocklist */
+  name: string;
+  /** Type of blocklist */
+  type: BlocklistType;
 }
 
 /**
  * Classification result from the bounce classifier
  */
 export interface ClassificationResult {
-    /** The predicted label */
-    label: BounceLabel;
-    /** Confidence score (0-1) */
-    confidence: number;
-    /** Recommended action based on the label */
-    action: BounceAction;
-    /** Scores for all labels */
-    scores: Record<BounceLabel, number>;
-    /** Whether SMTP code fallback was used (present if true) */
-    usedFallback?: boolean;
-    /** Retry time in seconds (only present if timing found in message) */
-    retryAfter?: number;
-    /** Identified blocklist (only present if blocklist found in message) */
-    blocklist?: BlocklistInfo | MultipleBlocklistInfo;
+  /** The predicted label */
+  label: BounceLabel;
+  /** Confidence score (0-1) */
+  confidence: number;
+  /** Recommended action based on the label */
+  action: BounceAction;
+  /** Scores for all labels */
+  scores: Record<BounceLabel, number>;
+  /** Whether SMTP code fallback was used (present if true) */
+  usedFallback?: boolean;
+  /** Retry time in seconds (only present if timing found in message) */
+  retryAfter?: number;
+  /** Identified blocklist (only present if blocklist found in message) */
+  blocklist?: BlocklistInfo | MultipleBlocklistInfo;
 }
 
 /**
  * SMTP codes extraction result
  */
 export interface SmtpCodes {
-    /** Main 3-digit SMTP code (e.g., '550') */
-    mainCode: string | null;
-    /** Extended SMTP code (e.g., '5.1.1') */
-    extendedCode: string | null;
+  /** Main 3-digit SMTP code (e.g., '550') */
+  mainCode: string | null;
+  /** Extended SMTP code (e.g., '5.1.1') */
+  extendedCode: string | null;
 }
 
 /**
  * Initialization options
  */
 export interface InitializeOptions {
-    /** Path or URL to model directory (optional, uses default if not provided) */
-    modelPath?: string;
+  /** Path or URL to model directory (optional, uses default if not provided) */
+  modelPath?: string;
 }
 
 /**
@@ -156,7 +156,9 @@ export function classify(message: string): Promise<ClassificationResult>;
  * @param messages - Array of bounce messages to classify
  * @returns Array of classification results
  */
-export function classifyBatch(messages: string[]): Promise<ClassificationResult[]>;
+export function classifyBatch(
+  messages: string[],
+): Promise<ClassificationResult[]>;
 
 /**
  * Get list of all possible labels
@@ -186,7 +188,9 @@ export function extractRetryTiming(message: string): number | null;
  * @param message - The bounce message
  * @returns Blocklist info, or null if not found
  */
-export function identifyBlocklist(message: string): BlocklistInfo | MultipleBlocklistInfo | null;
+export function identifyBlocklist(
+  message: string,
+): BlocklistInfo | MultipleBlocklistInfo | null;
 
 /**
  * Get recommended action based on bounce category
@@ -213,22 +217,22 @@ export function getCodeBasedFallback(message: string): BounceLabel | null;
  * Default export with all functions and constants
  */
 declare const bounceClassifier: {
-    classify: typeof classify;
-    classifyBatch: typeof classifyBatch;
-    getLabels: typeof getLabels;
-    initialize: typeof initialize;
-    isReady: typeof isReady;
-    reset: typeof reset;
-    extractRetryTiming: typeof extractRetryTiming;
-    identifyBlocklist: typeof identifyBlocklist;
-    getAction: typeof getAction;
-    extractSmtpCodes: typeof extractSmtpCodes;
-    getCodeBasedFallback: typeof getCodeBasedFallback;
-    ACTION_MAP: typeof ACTION_MAP;
-    BLOCKLIST_PATTERNS: typeof BLOCKLIST_PATTERNS;
-    SMTP_CODE_MAP: typeof SMTP_CODE_MAP;
-    SMTP_MAIN_CODE_MAP: typeof SMTP_MAIN_CODE_MAP;
-    CODE_FALLBACK_THRESHOLD: typeof CODE_FALLBACK_THRESHOLD;
+  classify: typeof classify;
+  classifyBatch: typeof classifyBatch;
+  getLabels: typeof getLabels;
+  initialize: typeof initialize;
+  isReady: typeof isReady;
+  reset: typeof reset;
+  extractRetryTiming: typeof extractRetryTiming;
+  identifyBlocklist: typeof identifyBlocklist;
+  getAction: typeof getAction;
+  extractSmtpCodes: typeof extractSmtpCodes;
+  getCodeBasedFallback: typeof getCodeBasedFallback;
+  ACTION_MAP: typeof ACTION_MAP;
+  BLOCKLIST_PATTERNS: typeof BLOCKLIST_PATTERNS;
+  SMTP_CODE_MAP: typeof SMTP_CODE_MAP;
+  SMTP_MAIN_CODE_MAP: typeof SMTP_MAIN_CODE_MAP;
+  CODE_FALLBACK_THRESHOLD: typeof CODE_FALLBACK_THRESHOLD;
 };
 
 export default bounceClassifier;

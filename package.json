@@ -24,6 +24,7 @@
   ],
   "scripts": {
     "build": "node build.js",
+    "format": "prettier --write .",
     "prepublishOnly": "npm run build",
     "test": "node test/test.js"
   },
@@ -31,7 +32,8 @@
     "@tensorflow/tfjs": "^4.22.0"
   },
   "devDependencies": {
-    "esbuild": "^0.24.2"
+    "esbuild": "^0.24.2",
+    "prettier": "^3.7.4"
   },
   "engines": {
     "node": ">=18.0.0"
