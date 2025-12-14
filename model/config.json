@@ -3,5 +3,5 @@
   "max_length": 100,
   "embedding_dim": 64,
   "num_labels": 16,
-  "validation_accuracy": 0.862697422504425
+  "validation_accuracy": 0.9536541700363159
 }

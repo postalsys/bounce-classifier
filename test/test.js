@@ -681,7 +681,8 @@ describe("Classifier", () => {
     it("should classify relay_denied bounces", async () => {
       const messages = [
         "550 5.7.2 Relay access denied",
-        "551 User not local; please try forwarding",
+        "450 4.7.1 We do not relay for example.com",
+        "451 relay not permitted!",
       ];
       for (const msg of messages) {
         const result = await classify(msg);
@@ -691,6 +692,15 @@ describe("Classifier", () => {
           `Expected relay_denied for: ${msg}`,
         );
       }
+    });
+
+    it("should classify 551 not local as invalid_address", async () => {
+      const result = await classify("551 User not local; please try forwarding");
+      assert.strictEqual(
+        result.label,
+        "invalid_address",
+        "Expected invalid_address for 551 User not local",
+      );
     });
 
     it("should classify domain_blacklisted bounces", async () => {
