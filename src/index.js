@@ -6,8 +6,6 @@
  * Licensed under MIT
  */
 
-import { createRequire } from "module";
-
 // Configuration
 const MAX_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
@@ -17,13 +15,6 @@ const NUM_LABELS = 16;
 // Detect environment
 const isBrowser =
   typeof window !== "undefined" && typeof window.document !== "undefined";
-const isNode =
-  typeof process !== "undefined" &&
-  process.versions != null &&
-  process.versions.node != null;
-
-// Create require function for ESM compatibility (works in both ESM and CJS after bundling)
-const nodeRequire = isNode ? createRequire(import.meta.url) : null;
 
 // Action mapping based on bounce category
 export const ACTION_MAP = {
@@ -406,9 +397,9 @@ async function loadJson(filePath) {
     }
     return response.json();
   } else {
-    // Node.js - use nodeRequire for pkg compatibility
-    const fs = nodeRequire("fs").promises;
-    return JSON.parse(await fs.readFile(filePath, "utf8"));
+    // Node.js - use dynamic import
+    const fs = await import("fs");
+    return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
   }
 }
 
@@ -424,8 +415,8 @@ async function loadWeights(filePath) {
     const buffer = await response.arrayBuffer();
     return new Float32Array(buffer);
   } else {
-    const fs = nodeRequire("fs").promises;
-    const buffer = await fs.readFile(filePath);
+    const fs = await import("fs");
+    const buffer = await fs.promises.readFile(filePath);
     return new Float32Array(
       buffer.buffer,
       buffer.byteOffset,
@@ -557,9 +548,9 @@ async function getDefaultModelPath() {
     return cachedModelPath;
   }
 
-  // Node.js - use nodeRequire for pkg compatibility
-  const path = nodeRequire("path");
-  const url = nodeRequire("url");
+  // Node.js - use dynamic imports
+  const path = await import("path");
+  const url = await import("url");
 
   // import.meta.url gives us the URL of this module
   const __filename = url.fileURLToPath(import.meta.url);
@@ -595,9 +586,13 @@ export async function initialize(options = {}) {
       modelBasePath = options.modelPath || (await getDefaultModelPath());
 
       // Determine path joiner based on environment
-      const joinPath = isBrowser
-        ? (...parts) => parts.join("/")
-        : nodeRequire("path").join;
+      let joinPath;
+      if (isBrowser) {
+        joinPath = (...parts) => parts.join("/");
+      } else {
+        const path = await import("path");
+        joinPath = path.join;
+      }
 
       // Load vocabulary
       const vocabPath = joinPath(modelBasePath, "vocab.json");
