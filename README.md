@@ -1,8 +1,8 @@
 # @postalsys/bounce-classifier
 
-SMTP bounce message classifier using TensorFlow.js machine learning. Classifies email bounce/error messages into 16 categories.
+SMTP bounce message classifier using machine learning. Classifies email bounce/error messages into 16 categories.
 
-Works in both **Node.js** and **browsers** - runs entirely client-side with no server required.
+Works in both **Node.js** and **browsers** - runs entirely client-side with no server required. Zero runtime dependencies.
 
 ## Installation
 
@@ -92,26 +92,6 @@ const result2 = await classify("550 blocked using zen.spamhaus.org");
 //   scores: { ... }
 // }
 ```
-
-### `classifyBatch(messages: string[]): Promise<ClassificationResult[]>`
-
-Classify multiple messages efficiently in a single batch.
-
-```javascript
-const results = await classifyBatch([
-  "550 User Unknown",
-  "452 Mailbox full",
-  "421 Try again later",
-]);
-```
-
-**Why use batch instead of a loop?** Batching is significantly faster than calling `classify()` in a loop because:
-
-- **Single TensorFlow operation**: One `model.predict()` call instead of N separate calls
-- **Reduced overhead**: One tensor allocation/disposal instead of N
-- **Parallelization**: TensorFlow processes all inputs simultaneously using GPU/SIMD
-
-For 100 messages, batching can be 10-50x faster depending on environment. The batch API has a maximum size of 1,000 messages per call.
 
 ### `getLabels(): Promise<string[]>`
 
@@ -205,6 +185,7 @@ npx serve ..
 - **Max sequence length**: 100 tokens
 - **Validation accuracy**: ~95%
 - **Model size**: ~1.3 MB
+- **Runtime**: Pure JavaScript (no native dependencies)
 
 ## License
 

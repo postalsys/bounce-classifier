@@ -1,6 +1,6 @@
 /**
  * @postalsys/bounce-classifier
- * SMTP bounce message classifier using TensorFlow.js
+ * SMTP bounce message classifier using pure JavaScript inference
  *
  * Copyright (c) Postal Systems OU
  * Licensed under MIT
@@ -152,15 +152,6 @@ export function initialize(options?: InitializeOptions): Promise<void>;
 export function classify(message: string): Promise<ClassificationResult>;
 
 /**
- * Classify multiple bounce messages in batch
- * @param messages - Array of bounce messages to classify
- * @returns Array of classification results
- */
-export function classifyBatch(
-  messages: string[],
-): Promise<ClassificationResult[]>;
-
-/**
  * Get list of all possible labels
  * @returns Array of label names
  */
@@ -225,7 +216,6 @@ export function getTextBasedFallback(message: string): BounceLabel | null;
  */
 declare const bounceClassifier: {
   classify: typeof classify;
-  classifyBatch: typeof classifyBatch;
   getLabels: typeof getLabels;
   initialize: typeof initialize;
   isReady: typeof isReady;

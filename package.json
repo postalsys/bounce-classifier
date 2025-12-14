@@ -29,9 +29,6 @@
     "prepublishOnly": "npm run build",
     "test": "node --test test/test.js"
   },
-  "dependencies": {
-    "@tensorflow/tfjs": "^4.22.0"
-  },
   "devDependencies": {
     "esbuild": "^0.24.2",
     "eslint": "^9.39.2",
@@ -50,8 +47,7 @@
     "bounce",
     "email",
     "classifier",
-    "machine-learning",
-    "tensorflow"
+    "machine-learning"
   ],
   "homepage": "https://github.com/postalsys/bounce-classifier#readme",
   "bugs": {

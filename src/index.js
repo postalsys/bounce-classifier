@@ -1,18 +1,18 @@
 /**
  * @postalsys/bounce-classifier
- * SMTP bounce message classifier using TensorFlow.js
+ * SMTP bounce message classifier using pure JavaScript inference
  *
  * Copyright (c) Postal Systems OU
  * Licensed under MIT
  */
 
-import * as tf from "@tensorflow/tfjs";
 import { createRequire } from "module";
 
 // Configuration
 const MAX_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
-const MAX_BATCH_SIZE = 1000; // Max messages per batch
+const EMBEDDING_DIM = 64;
+const NUM_LABELS = 16;
 
 // Detect environment
 const isBrowser =
@@ -357,7 +357,7 @@ function sanitizeMessage(message, context = "Message") {
 }
 
 // Singleton state
-let model = null;
+let weights = null;
 let vocabMap = null;
 let labels = null;
 let isInitialized = false;
@@ -412,64 +412,136 @@ async function loadJson(filePath) {
   }
 }
 
-// Cache for computed model path
-let cachedModelPath = null;
-
 /**
- * Custom IO handler for loading model from local files in Node.js
+ * Load binary weights file
  */
-class NodeFileSystem {
-  constructor(modelPath) {
-    this.modelPath = modelPath;
-  }
-
-  async load() {
-    // Use nodeRequire for pkg compatibility
+async function loadWeights(filePath) {
+  if (isBrowser) {
+    const response = await fetch(filePath);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${filePath}: ${response.status}`);
+    }
+    const buffer = await response.arrayBuffer();
+    return new Float32Array(buffer);
+  } else {
     const fs = nodeRequire("fs").promises;
-    const path = nodeRequire("path");
-
-    const modelJsonPath = path.join(this.modelPath, "model.json");
-    const modelJSON = JSON.parse(await fs.readFile(modelJsonPath, "utf8"));
-
-    const weightsManifest = modelJSON.weightsManifest;
-    const weightSpecs = [];
-    const weightData = [];
-
-    for (const group of weightsManifest) {
-      for (const weight of group.weights) {
-        weightSpecs.push(weight);
-      }
-      for (const filePath of group.paths) {
-        const fullPath = path.join(this.modelPath, filePath);
-        const buffer = await fs.readFile(fullPath);
-        weightData.push(
-          buffer.buffer.slice(
-            buffer.byteOffset,
-            buffer.byteOffset + buffer.byteLength,
-          ),
-        );
-      }
-    }
-
-    const totalBytes = weightData.reduce((acc, buf) => acc + buf.byteLength, 0);
-    const concatenated = new ArrayBuffer(totalBytes);
-    const view = new Uint8Array(concatenated);
-    let offset = 0;
-    for (const buf of weightData) {
-      view.set(new Uint8Array(buf), offset);
-      offset += buf.byteLength;
-    }
-
-    return {
-      modelTopology: modelJSON.modelTopology,
-      weightSpecs,
-      weightData: concatenated,
-      format: modelJSON.format,
-      generatedBy: modelJSON.generatedBy,
-      convertedBy: modelJSON.convertedBy,
-    };
+    const buffer = await fs.readFile(filePath);
+    return new Float32Array(
+      buffer.buffer,
+      buffer.byteOffset,
+      buffer.byteLength / 4,
+    );
   }
 }
+
+/**
+ * Parse weights from binary data according to model structure
+ * Order from model.json weightsManifest:
+ * - dense/kernel: [64, 64]
+ * - dense/bias: [64]
+ * - dense_1/kernel: [64, 16]
+ * - dense_1/bias: [16]
+ * - embedding/embeddings: [5000, 64]
+ */
+function parseWeights(data) {
+  let offset = 0;
+
+  // Dense layer 1: kernel [64, 64] and bias [64]
+  const dense1KernelSize = 64 * 64;
+  const dense1Kernel = data.slice(offset, offset + dense1KernelSize);
+  offset += dense1KernelSize;
+
+  const dense1BiasSize = 64;
+  const dense1Bias = data.slice(offset, offset + dense1BiasSize);
+  offset += dense1BiasSize;
+
+  // Dense layer 2: kernel [64, 16] and bias [16]
+  const dense2KernelSize = 64 * NUM_LABELS;
+  const dense2Kernel = data.slice(offset, offset + dense2KernelSize);
+  offset += dense2KernelSize;
+
+  const dense2BiasSize = NUM_LABELS;
+  const dense2Bias = data.slice(offset, offset + dense2BiasSize);
+  offset += dense2BiasSize;
+
+  // Embedding: [5000, 64]
+  const embedding = data.slice(offset);
+
+  return {
+    embedding,
+    dense1Kernel,
+    dense1Bias,
+    dense2Kernel,
+    dense2Bias,
+  };
+}
+
+/**
+ * ReLU activation function
+ */
+function relu(x) {
+  return Math.max(0, x);
+}
+
+/**
+ * Softmax activation function
+ */
+function softmax(arr) {
+  const max = Math.max(...arr);
+  const exps = arr.map((x) => Math.exp(x - max));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map((e) => e / sum);
+}
+
+/**
+ * Forward pass through the neural network
+ * Architecture: Embedding -> GlobalAveragePooling1D -> Dense(64, relu) -> Dense(16, softmax)
+ */
+function forward(tokens) {
+  // Embedding lookup and global average pooling combined
+  // Note: GlobalAveragePooling1D averages over ALL timesteps (including padding)
+  // since the embedding layer has mask_zero=False
+  const pooled = new Float32Array(EMBEDDING_DIM).fill(0);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tokenId = tokens[i];
+    const embOffset = tokenId * EMBEDDING_DIM;
+    for (let j = 0; j < EMBEDDING_DIM; j++) {
+      pooled[j] += weights.embedding[embOffset + j];
+    }
+  }
+
+  // Average over all timesteps (MAX_LENGTH = 100)
+  for (let j = 0; j < EMBEDDING_DIM; j++) {
+    pooled[j] /= MAX_LENGTH;
+  }
+
+  // Dense layer 1: [64] -> [64] with ReLU
+  const hidden = new Float32Array(64);
+  for (let i = 0; i < 64; i++) {
+    let sum = weights.dense1Bias[i];
+    for (let j = 0; j < 64; j++) {
+      sum += pooled[j] * weights.dense1Kernel[j * 64 + i];
+    }
+    hidden[i] = relu(sum);
+  }
+
+  // Dense layer 2: [64] -> [16]
+  const output = new Float32Array(NUM_LABELS);
+  for (let i = 0; i < NUM_LABELS; i++) {
+    let sum = weights.dense2Bias[i];
+    for (let j = 0; j < 64; j++) {
+      sum += hidden[j] * weights.dense2Kernel[j * NUM_LABELS + i];
+    }
+    output[i] = sum;
+  }
+
+  // Softmax
+  return softmax(Array.from(output));
+}
+
+// Cache for computed model path
+let cachedModelPath = null;
 
 /**
  * Get default model path based on environment
@@ -539,15 +611,10 @@ export async function initialize(options = {}) {
       const labelsPath = joinPath(modelBasePath, "labels.json");
       labels = await loadJson(labelsPath);
 
-      // Load TensorFlow.js model
-      if (isBrowser) {
-        // Browser: use URL-based loading
-        model = await tf.loadLayersModel(`${modelBasePath}/model.json`);
-      } else {
-        // Node.js: use custom file system handler
-        const handler = new NodeFileSystem(modelBasePath);
-        model = await tf.loadLayersModel(handler);
-      }
+      // Load weights
+      const weightsPath = joinPath(modelBasePath, "group1-shard1of1.bin");
+      const weightsData = await loadWeights(weightsPath);
+      weights = parseWeights(weightsData);
 
       isInitialized = true;
     } catch (error) {
@@ -571,12 +638,7 @@ export async function classify(message) {
   message = sanitizeMessage(message);
 
   const tokens = tokenize(message);
-  const inputTensor = tf.tensor2d([tokens], [1, MAX_LENGTH], "int32");
-  const prediction = model.predict(inputTensor);
-  const scores = await prediction.data();
-
-  inputTensor.dispose();
-  prediction.dispose();
+  const scores = forward(tokens);
 
   let maxScore = 0;
   let maxIndex = 0;
@@ -621,96 +683,6 @@ export async function classify(message) {
 }
 
 /**
- * Classify multiple bounce messages in batch
- * @param {string[]} messages - Array of bounce messages to classify
- * @returns {Promise<Object[]>} Array of classification results
- */
-export async function classifyBatch(messages) {
-  await initialize();
-
-  if (!Array.isArray(messages)) {
-    throw new Error("Messages must be an array");
-  }
-
-  if (messages.length === 0) {
-    return [];
-  }
-
-  if (messages.length > MAX_BATCH_SIZE) {
-    throw new Error(
-      `Batch size ${messages.length} exceeds maximum of ${MAX_BATCH_SIZE}`,
-    );
-  }
-
-  // Validate and sanitize all messages before processing
-  const sanitizedMessages = messages.map((msg, index) =>
-    sanitizeMessage(msg, `Message at index ${index}`),
-  );
-
-  const tokenizedMessages = sanitizedMessages.map((msg) => tokenize(msg));
-  const inputTensor = tf.tensor2d(
-    tokenizedMessages,
-    [sanitizedMessages.length, MAX_LENGTH],
-    "int32",
-  );
-  const predictions = model.predict(inputTensor);
-  const allScores = await predictions.data();
-
-  inputTensor.dispose();
-  predictions.dispose();
-
-  const results = [];
-  const numLabels = Object.keys(labels.id_to_label).length;
-
-  for (let i = 0; i < sanitizedMessages.length; i++) {
-    const offset = i * numLabels;
-    let maxScore = 0;
-    let maxIndex = 0;
-    const scores = {};
-
-    for (let j = 0; j < numLabels; j++) {
-      const score = allScores[offset + j];
-      const labelName = labels.id_to_label[j];
-      scores[labelName] = score;
-      if (score > maxScore) {
-        maxScore = score;
-        maxIndex = j;
-      }
-    }
-
-    let label = labels.id_to_label[maxIndex];
-    let usedFallback = false;
-
-    if (maxScore < CODE_FALLBACK_THRESHOLD) {
-      const fallbackLabel = getCodeBasedFallback(sanitizedMessages[i]);
-      if (fallbackLabel) {
-        label = fallbackLabel;
-        usedFallback = true;
-      }
-    }
-
-    const result = {
-      label,
-      confidence: maxScore,
-      action: getAction(label),
-      scores,
-    };
-
-    if (usedFallback) result.usedFallback = true;
-
-    const retryAfter = extractRetryTiming(sanitizedMessages[i]);
-    if (retryAfter !== null) result.retryAfter = retryAfter;
-
-    const blocklist = identifyBlocklist(sanitizedMessages[i]);
-    if (blocklist !== null) result.blocklist = blocklist;
-
-    results.push(result);
-  }
-
-  return results;
-}
-
-/**
  * Get list of all possible labels
  * @returns {Promise<string[]>} Array of label names
  */
@@ -731,10 +703,7 @@ export function isReady() {
  * Reset classifier state (for testing or re-initialization)
  */
 export function reset() {
-  if (model) {
-    model.dispose();
-  }
-  model = null;
+  weights = null;
   vocabMap = null;
   labels = null;
   isInitialized = false;
@@ -746,7 +715,6 @@ export function reset() {
 // Default export
 export default {
   classify,
-  classifyBatch,
   getLabels,
   initialize,
   isReady,
