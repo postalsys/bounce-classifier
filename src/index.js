@@ -213,6 +213,10 @@ const TEXT_PATTERN_FALLBACKS = [
   { pattern: /recipient rejected/i, label: "user_unknown" },
   { pattern: /sender is unauthenticated/i, label: "auth_failure" },
   { pattern: /requires .{0,50}? authenticate/i, label: "auth_failure" },
+  { pattern: /illegal attachment/i, label: "virus_detected" },
+  { pattern: /virus .{0,20}?detected/i, label: "virus_detected" },
+  { pattern: /infected .{0,20}?attachment/i, label: "virus_detected" },
+  { pattern: /malware .{0,20}?detected/i, label: "virus_detected" },
 ];
 
 /**
@@ -668,7 +672,8 @@ export async function classify(message) {
   let label = labels.id_to_label[maxIndex];
   let usedFallback = false;
 
-  if (maxScore < CODE_FALLBACK_THRESHOLD) {
+  // Use fallback if confidence is low OR if the result is "unknown"
+  if (maxScore < CODE_FALLBACK_THRESHOLD || label === "unknown") {
     const fallbackLabel = getCodeBasedFallback(message);
     if (fallbackLabel) {
       label = fallbackLabel;
