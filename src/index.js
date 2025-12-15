@@ -217,6 +217,12 @@ const TEXT_PATTERN_FALLBACKS = [
   { pattern: /virus .{0,20}?detected/i, label: "virus_detected" },
   { pattern: /infected .{0,20}?attachment/i, label: "virus_detected" },
   { pattern: /malware .{0,20}?detected/i, label: "virus_detected" },
+  { pattern: /out of storage space/i, label: "mailbox_full" },
+  { pattern: /over ?quota/i, label: "mailbox_full" },
+  { pattern: /quota exceeded/i, label: "mailbox_full" },
+  { pattern: /mailbox.{0,20}?full/i, label: "mailbox_full" },
+  { pattern: /user unknown in/i, label: "user_unknown" },
+  { pattern: /address rejected.{0,30}?user unknown/i, label: "user_unknown" },
 ];
 
 /**
@@ -672,11 +678,16 @@ export async function classify(message) {
   let label = labels.id_to_label[maxIndex];
   let usedFallback = false;
 
-  // Use fallback if confidence is low OR if the result is "unknown"
-  if (maxScore < CODE_FALLBACK_THRESHOLD || label === "unknown") {
-    const fallbackLabel = getCodeBasedFallback(message);
-    if (fallbackLabel) {
-      label = fallbackLabel;
+  // Text patterns take priority (most reliable for specific phrases)
+  const textFallback = getTextBasedFallback(message);
+  if (textFallback) {
+    label = textFallback;
+    usedFallback = true;
+  } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === "unknown") {
+    // Use SMTP code fallback if confidence is low or result is "unknown"
+    const codeFallback = getCodeBasedFallback(message);
+    if (codeFallback) {
+      label = codeFallback;
       usedFallback = true;
     }
   }
