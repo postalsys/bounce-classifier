@@ -6,6 +6,8 @@
  * Licensed under MIT
  */
 
+/* eslint-disable no-undef */
+
 // Configuration
 const MAX_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
@@ -15,6 +17,24 @@ const NUM_LABELS = 16;
 // Detect environment
 const isBrowser =
   typeof window !== "undefined" && typeof window.document !== "undefined";
+
+// Node.js modules - loaded lazily on first use for browser compatibility
+// In Node.js these are loaded once; in browser these remain null
+let _fs = null;
+let _path = null;
+let _url = null;
+let _nodeModulesLoaded = false;
+
+async function loadNodeModules() {
+  if (_nodeModulesLoaded || isBrowser) return;
+  _nodeModulesLoaded = true;
+
+  // Use dynamic import for ESM compatibility
+  // esbuild converts these to require() in CJS bundle, which pkg can trace
+  _fs = await import("fs");
+  _path = await import("path");
+  _url = await import("url");
+}
 
 // Action mapping based on bounce category
 export const ACTION_MAP = {
@@ -397,9 +417,8 @@ async function loadJson(filePath) {
     }
     return response.json();
   } else {
-    // Node.js - use dynamic import
-    const fs = await import("fs");
-    return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
+    await loadNodeModules();
+    return JSON.parse(await _fs.promises.readFile(filePath, "utf8"));
   }
 }
 
@@ -415,8 +434,8 @@ async function loadWeights(filePath) {
     const buffer = await response.arrayBuffer();
     return new Float32Array(buffer);
   } else {
-    const fs = await import("fs");
-    const buffer = await fs.promises.readFile(filePath);
+    await loadNodeModules();
+    const buffer = await _fs.promises.readFile(filePath);
     return new Float32Array(
       buffer.buffer,
       buffer.byteOffset,
@@ -548,14 +567,12 @@ async function getDefaultModelPath() {
     return cachedModelPath;
   }
 
-  // Node.js - use dynamic imports
-  const path = await import("path");
-  const url = await import("url");
-
+  // Node.js - load modules first
+  await loadNodeModules();
   // import.meta.url gives us the URL of this module
-  const __filename = url.fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  cachedModelPath = path.join(__dirname, "..", "model");
+  const __filename = _url.fileURLToPath(import.meta.url);
+  const __dirname = _path.dirname(__filename);
+  cachedModelPath = _path.join(__dirname, "..", "model");
 
   return cachedModelPath;
 }
@@ -590,8 +607,8 @@ export async function initialize(options = {}) {
       if (isBrowser) {
         joinPath = (...parts) => parts.join("/");
       } else {
-        const path = await import("path");
-        joinPath = path.join;
+        await loadNodeModules();
+        joinPath = (...parts) => _path.join(...parts);
       }
 
       // Load vocabulary
