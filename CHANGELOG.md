@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.0](https://github.com/postalsys/bounce-classifier/compare/v1.2.1...v2.0.0) (2025-12-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* Remove classifyBatch() API - use classify() in a loop instead
+
+### Bug Fixes
+
+* improve classification accuracy with text pattern priority ([85d0319](https://github.com/postalsys/bounce-classifier/commit/85d03194b8d23b517aa992bbb470daaefe5d39e0))
+* improve virus_detected classification with text pattern fallbacks ([798ca30](https://github.com/postalsys/bounce-classifier/commit/798ca30f41ce75286f326c1b2b35910bd7f8fda0))
+* use dynamic imports for browser compatibility ([88850ca](https://github.com/postalsys/bounce-classifier/commit/88850ca0803f723d58301cd8d5e317fe50fc98c5))
+* use static requires in CJS bundle for pkg compatibility ([873adc9](https://github.com/postalsys/bounce-classifier/commit/873adc998a45da529b1368da41b75eaa74774337))
+
+
+### Code Refactoring
+
+* replace TensorFlow.js with pure JS inference ([8f05baa](https://github.com/postalsys/bounce-classifier/commit/8f05baac7c7a6a30d79f5d96717f48ba64c20f43))
+
 ## [1.2.1](https://github.com/postalsys/bounce-classifier/compare/v1.2.0...v1.2.1) (2025-12-14)
 
 
