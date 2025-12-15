@@ -4,7 +4,7 @@ SMTP bounce message classifier using machine learning. Classifies email bounce/e
 
 Works in both **Node.js** and **browsers** - runs entirely client-side with no server required. Zero runtime dependencies.
 
-**[Live Demo](https://aiateibad.com/bounce-classifier/example/)**
+**[Live Demo](https://postalsys.github.io/bounce-classifier/example/)**
 
 ## Installation
 
