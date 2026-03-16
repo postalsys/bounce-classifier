@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.0](https://github.com/postalsys/bounce-classifier/compare/v2.3.0...v2.4.0) (2026-03-16)
+
+
+### Features
+
+* add update-model script and prepublish hook ([bb3625d](https://github.com/postalsys/bounce-classifier/commit/bb3625d82d571e293efe07118836a3b00318442e))
+
+
+### Bug Fixes
+
+* make ambiguous classification tests model-resilient ([c57588d](https://github.com/postalsys/bounce-classifier/commit/c57588dc7c3287425c18553a70d3c4e453fa14ca))
+
 ## [2.3.0](https://github.com/postalsys/bounce-classifier/compare/v2.2.0...v2.3.0) (2026-03-16)
 
 
