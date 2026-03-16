@@ -221,6 +221,13 @@ const TEXT_PATTERN_FALLBACKS = [
   { pattern: /mailbox.{0,20}?full/i, label: "mailbox_full" },
   { pattern: /user unknown in/i, label: "user_unknown" },
   { pattern: /address rejected.{0,30}?user unknown/i, label: "user_unknown" },
+  { pattern: /too many .{0,30}?connections/i, label: "rate_limited" },
+  { pattern: /too many .{0,30}?messages/i, label: "rate_limited" },
+  { pattern: /too many .{0,30}?recipients/i, label: "rate_limited" },
+  { pattern: /rate .{0,20}?limit/i, label: "rate_limited" },
+  { pattern: /sending .{0,20}?limit/i, label: "rate_limited" },
+  { pattern: /connection .{0,20}?limit/i, label: "rate_limited" },
+  { pattern: /throttl/i, label: "rate_limited" },
 ];
 
 /**
