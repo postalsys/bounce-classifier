@@ -112,6 +112,20 @@ export interface InitializeOptions {
 }
 
 /**
+ * Model metadata returned by getModelInfo()
+ */
+export interface ModelInfo {
+  /** Short SHA-256 hash of the weights file (first 16 hex chars), or null for older models */
+  modelHash: string | null;
+  /** ISO 8601 UTC timestamp of when the model was trained, or null */
+  trainedAt: string | null;
+  /** Number of training samples used, or null */
+  trainingSamples: number | null;
+  /** Validation accuracy from training (0-1), or null */
+  validationAccuracy: number | null;
+}
+
+/**
  * Action mapping from label to recommended action
  */
 export const ACTION_MAP: Record<BounceLabel, BounceAction>;
@@ -156,6 +170,12 @@ export function classify(message: string): Promise<ClassificationResult>;
  * @returns Array of label names
  */
 export function getLabels(): Promise<BounceLabel[]>;
+
+/**
+ * Get model metadata (hash, training date, accuracy, etc.)
+ * Returns null if the model is not yet initialized.
+ */
+export function getModelInfo(): ModelInfo | null;
 
 /**
  * Check if the classifier is initialized
@@ -229,6 +249,7 @@ declare const bounceClassifier: {
   getLabels: typeof getLabels;
   initialize: typeof initialize;
   isReady: typeof isReady;
+  getModelInfo: typeof getModelInfo;
   reset: typeof reset;
   reload: typeof reload;
   extractRetryTiming: typeof extractRetryTiming;

@@ -379,6 +379,7 @@ function sanitizeMessage(message, context = "Message") {
 let weights = null;
 let vocabMap = null;
 let labels = null;
+let modelConfig = null;
 let isInitialized = false;
 let initPromise = null;
 let modelBasePath = null;
@@ -636,6 +637,14 @@ export async function initialize(options = {}) {
       const weightsData = await loadWeights(weightsPath);
       weights = parseWeights(weightsData);
 
+      // Load config (optional - older models may not have it)
+      try {
+        const configPath = joinPath(modelBasePath, "config.json");
+        modelConfig = await loadJson(configPath);
+      } catch {
+        modelConfig = {};
+      }
+
       isInitialized = true;
     } catch (error) {
       // Clear promise so next call can retry initialization
@@ -718,6 +727,21 @@ export async function getLabels() {
 }
 
 /**
+ * Get model metadata (hash, training date, accuracy, etc.)
+ * Returns null if the model is not yet initialized.
+ * @returns {Object|null}
+ */
+export function getModelInfo() {
+  if (!isInitialized || !modelConfig) return null;
+  return {
+    modelHash: modelConfig.model_hash || null,
+    trainedAt: modelConfig.trained_at || null,
+    trainingSamples: modelConfig.training_samples || null,
+    validationAccuracy: modelConfig.validation_accuracy || null,
+  };
+}
+
+/**
  * Check if the classifier is initialized
  * @returns {boolean}
  */
@@ -732,6 +756,7 @@ export function reset() {
   weights = null;
   vocabMap = null;
   labels = null;
+  modelConfig = null;
   isInitialized = false;
   initPromise = null;
   modelBasePath = null;
@@ -761,6 +786,7 @@ export default {
   getLabels,
   initialize,
   isReady,
+  getModelInfo,
   reset,
   reload,
   extractRetryTiming,
