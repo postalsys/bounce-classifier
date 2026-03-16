@@ -4,7 +4,7 @@ SMTP bounce message classifier using machine learning. Classifies email bounce/e
 
 Works in both **Node.js** and **browsers** - runs entirely client-side with no server required. Zero runtime dependencies.
 
-**[Live Demo](https://postalsys.github.io/bounce-classifier/example/)**
+**[Live Demo](https://postalsys.github.io/bounce-classifier/example/)** | **[Bounce Trainer](https://bounces.postalsys.com)** - submit labeled bounces to improve the classifier
 
 > [!NOTE]
 > This classifier was created for [EmailEngine](https://emailengine.app), a self-hosted email gateway that allows making REST requests against email accounts. For more information about how bounce classification integrates with EmailEngine, see the [messageBounce webhook documentation](https://learn.emailengine.app/docs/webhooks/messagebounce#bounce-categories).
