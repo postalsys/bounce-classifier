@@ -18,4 +18,6 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci
+      - name: Download model
+        run: npm run update-model
       - run: npm test

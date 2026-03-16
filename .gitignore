@@ -14,8 +14,8 @@ Thumbs.db
 *.swp
 *.swo
 
-# Keras model (only needed for Python, not JS runtime)
-model/keras_model.h5
+# Model files (downloaded from bounces.postalsys.com, not stored in git)
+model/
 
 # Logs
 *.log

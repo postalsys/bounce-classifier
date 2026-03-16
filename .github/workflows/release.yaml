@@ -33,4 +33,6 @@ jobs:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
+      - name: Download latest model
+        run: npm run update-model
       - run: npm publish --provenance --access public
