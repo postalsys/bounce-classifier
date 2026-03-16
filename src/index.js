@@ -740,6 +740,23 @@ export function reset() {
   cachedModelPath = null;
 }
 
+/**
+ * Reload the model, optionally from a new path.
+ * Resets all state and re-initializes. Safe to call while classify()
+ * calls are in flight -- they will use the old model until the new
+ * one is ready, then subsequent calls use the new model.
+ *
+ * @param {Object} [options] - Configuration options
+ * @param {string} [options.modelPath] - New model directory path. If omitted,
+ *   reloads from the previously used path.
+ * @returns {Promise<void>}
+ */
+export async function reload(options = {}) {
+  const newPath = options.modelPath || modelBasePath;
+  reset();
+  return initialize({ modelPath: newPath });
+}
+
 // Default export
 export default {
   classify,
@@ -747,6 +764,7 @@ export default {
   initialize,
   isReady,
   reset,
+  reload,
   extractRetryTiming,
   identifyBlocklist,
   getAction,

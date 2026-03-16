@@ -168,6 +168,16 @@ export function isReady(): boolean;
 export function reset(): void;
 
 /**
+ * Reload the model, optionally from a new path.
+ * Resets all state and re-initializes. Safe to call while the
+ * classifier is in use -- subsequent classify() calls will use
+ * the new model once loading completes.
+ * @param options - Optional configuration. If modelPath is omitted,
+ *   reloads from the previously used path.
+ */
+export function reload(options?: InitializeOptions): Promise<void>;
+
+/**
  * Extract retry timing from a bounce message
  * @param message - The bounce message
  * @returns Retry time in seconds, or null if not found
@@ -220,6 +230,7 @@ declare const bounceClassifier: {
   initialize: typeof initialize;
   isReady: typeof isReady;
   reset: typeof reset;
+  reload: typeof reload;
   extractRetryTiming: typeof extractRetryTiming;
   identifyBlocklist: typeof identifyBlocklist;
   getAction: typeof getAction;
