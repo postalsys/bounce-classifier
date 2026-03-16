@@ -107,6 +107,32 @@ const labels = await getLabels();
 // ['auth_failure', 'domain_blacklisted', 'geo_blocked', ...]
 ```
 
+### `reload(options?): Promise<void>`
+
+Reload the model at runtime, optionally from a new path. This allows updating the model without restarting the process.
+
+```javascript
+// Reload from the same path (e.g., after retraining)
+await reload();
+
+// Switch to a different model directory
+await reload({ modelPath: "/path/to/new-model" });
+```
+
+### `getModelInfo(): ModelInfo | null`
+
+Get metadata about the loaded model. Returns `null` if not yet initialized.
+
+```javascript
+const info = getModelInfo();
+// {
+//   modelHash: '6b6a2c75307d59bf',    // truncated SHA-256 of weights
+//   trainedAt: '2026-03-16T14:30:00Z', // ISO 8601 UTC
+//   trainingSamples: 22630,
+//   validationAccuracy: 0.9523
+// }
+```
+
 ### `isReady(): boolean`
 
 Check if the classifier is initialized.
@@ -162,6 +188,31 @@ const codes = extractSmtpCodes("550 5.1.1 User unknown");
 | `virus_detected`     | Infected content detected          | remove_content     |
 | `geo_blocked`        | Geographic/country-based rejection | retry_different_ip |
 | `unknown`            | Unclassified bounce type           | review             |
+
+## Custom Model Path
+
+You can point the classifier to a different model directory, for example to use a retrained model:
+
+```javascript
+import {
+  initialize,
+  classify,
+  reload,
+  getModelInfo,
+} from "@postalsys/bounce-classifier";
+
+// Use a custom model at startup
+await initialize({ modelPath: "/path/to/retrained-model" });
+
+// Later, after retraining, reload the model without restarting
+await reload();
+
+// Check which model version is loaded
+const info = getModelInfo();
+console.log(info.modelHash); // '6b6a2c75307d59bf'
+```
+
+The model directory must contain `vocab.json`, `labels.json`, `group1-shard1of1.bin`, and `model.json`. The optional `config.json` provides metadata exposed through `getModelInfo()`.
 
 ## SMTP Code Fallback
 
