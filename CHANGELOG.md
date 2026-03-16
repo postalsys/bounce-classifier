@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/postalsys/bounce-classifier/compare/v2.1.0...v2.2.0) (2026-03-16)
+
+
+### Features
+
+* add getModelInfo() and model hash versioning ([36e57e0](https://github.com/postalsys/bounce-classifier/commit/36e57e0019b553caf9bc6c2fe0deffb2a05b1145))
+
 ## [2.1.0](https://github.com/postalsys/bounce-classifier/compare/v2.0.0...v2.1.0) (2026-03-16)
 
 
