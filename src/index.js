@@ -6,8 +6,6 @@
  * Licensed under MIT
  */
 
-/* eslint-disable no-undef */
-
 // Configuration
 const MAX_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
@@ -752,9 +750,9 @@ export function reset() {
  * @returns {Promise<void>}
  */
 export async function reload(options = {}) {
-  const newPath = options.modelPath || modelBasePath;
+  const modelPath = options.modelPath ?? modelBasePath;
   reset();
-  return initialize({ modelPath: newPath });
+  return initialize({ modelPath });
 }
 
 // Default export
