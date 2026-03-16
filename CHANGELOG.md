@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0](https://github.com/postalsys/bounce-classifier/compare/v2.0.0...v2.1.0) (2026-03-16)
+
+
+### Features
+
+* add reload() method for live model updates ([72da12a](https://github.com/postalsys/bounce-classifier/commit/72da12a3d88cb471a000bf85a5b598a343277a16))
+
+
+### Bug Fixes
+
+* update tests for retrained model and clean up lint ([274e23f](https://github.com/postalsys/bounce-classifier/commit/274e23fb626c43d3e1a9037df7fa8614471054e6))
+
 ## [2.0.0](https://github.com/postalsys/bounce-classifier/compare/v1.2.1...v2.0.0) (2025-12-15)
 
 
