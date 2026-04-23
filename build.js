@@ -17,7 +17,6 @@ async function main() {
     target: "node18",
     format: "cjs",
     outfile: "./dist/index.cjs",
-    external: ["@tensorflow/tfjs"],
     banner: {
       js: `/* @postalsys/bounce-classifier - CommonJS build */
 // Shim import.meta.url for CommonJS

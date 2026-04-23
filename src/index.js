@@ -10,6 +10,7 @@
 const MAX_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
 const EMBEDDING_DIM = 64;
+const HIDDEN_DIM = 64;
 const NUM_LABELS = 16;
 
 // Detect environment
@@ -193,7 +194,13 @@ export function extractSmtpCodes(message) {
   const result = { mainCode: null, extendedCode: null };
   const mainMatch = message.match(/^(\d{3})[\s-]/);
   if (mainMatch) result.mainCode = mainMatch[1];
-  const extMatch = message.match(/\b([245])\.(\d{1,3})\.(\d{1,3})\b/);
+  // Lookbehind/lookahead reject codes embedded inside IPv4 addresses
+  // (e.g. `5.7.1.100` must not yield `5.7.1`, and `192.168.1.1` must not
+  // yield `2.168.1`). Without these, RFC 3463 fallback misclassifies bounces
+  // that mention an IP whose first octets coincide with a real status code.
+  const extMatch = message.match(
+    /(?<!\d\.)\b([245])\.(\d{1,3})\.(\d{1,3})(?!\.\d)\b/,
+  );
   if (extMatch)
     result.extendedCode = `${extMatch[1]}.${extMatch[2]}.${extMatch[3]}`;
   return result;
@@ -429,12 +436,19 @@ async function loadJson(filePath) {
   if (isBrowser) {
     const response = await fetch(filePath);
     if (!response.ok) {
-      throw new Error(`Failed to fetch ${filePath}: ${response.status}`);
+      throw new Error(
+        `Failed to fetch ${filePath} (model path: ${modelBasePath}): ${response.status}`,
+      );
     }
     return response.json();
   } else {
     await loadNodeModules();
-    return JSON.parse(await _fs.promises.readFile(filePath, "utf8"));
+    try {
+      return JSON.parse(await _fs.promises.readFile(filePath, "utf8"));
+    } catch (err) {
+      err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
+      throw err;
+    }
   }
 }
 
@@ -445,18 +459,25 @@ async function loadWeights(filePath) {
   if (isBrowser) {
     const response = await fetch(filePath);
     if (!response.ok) {
-      throw new Error(`Failed to fetch ${filePath}: ${response.status}`);
+      throw new Error(
+        `Failed to fetch ${filePath} (model path: ${modelBasePath}): ${response.status}`,
+      );
     }
     const buffer = await response.arrayBuffer();
     return new Float32Array(buffer);
   } else {
     await loadNodeModules();
-    const buffer = await _fs.promises.readFile(filePath);
-    return new Float32Array(
-      buffer.buffer,
-      buffer.byteOffset,
-      buffer.byteLength / 4,
-    );
+    try {
+      const buffer = await _fs.promises.readFile(filePath);
+      return new Float32Array(
+        buffer.buffer,
+        buffer.byteOffset,
+        buffer.byteLength / 4,
+      );
+    } catch (err) {
+      err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
+      throw err;
+    }
   }
 }
 
@@ -542,28 +563,28 @@ function forward(tokens) {
     pooled[j] /= MAX_LENGTH;
   }
 
-  // Dense layer 1: [64] -> [64] with ReLU
-  const hidden = new Float32Array(64);
-  for (let i = 0; i < 64; i++) {
+  // Dense layer 1: [EMBEDDING_DIM] -> [HIDDEN_DIM] with ReLU
+  const hidden = new Float32Array(HIDDEN_DIM);
+  for (let i = 0; i < HIDDEN_DIM; i++) {
     let sum = weights.dense1Bias[i];
-    for (let j = 0; j < 64; j++) {
-      sum += pooled[j] * weights.dense1Kernel[j * 64 + i];
+    for (let j = 0; j < EMBEDDING_DIM; j++) {
+      sum += pooled[j] * weights.dense1Kernel[j * HIDDEN_DIM + i];
     }
     hidden[i] = relu(sum);
   }
 
-  // Dense layer 2: [64] -> [16]
+  // Dense layer 2: [HIDDEN_DIM] -> [NUM_LABELS]
   const output = new Float32Array(NUM_LABELS);
   for (let i = 0; i < NUM_LABELS; i++) {
     let sum = weights.dense2Bias[i];
-    for (let j = 0; j < 64; j++) {
+    for (let j = 0; j < HIDDEN_DIM; j++) {
       sum += hidden[j] * weights.dense2Kernel[j * NUM_LABELS + i];
     }
     output[i] = sum;
   }
 
-  // Softmax
-  return softmax(Array.from(output));
+  // Softmax (Float32Array.prototype.map / reduce / max-spread are fine here).
+  return softmax(output);
 }
 
 // Cache for computed model path
@@ -734,17 +755,24 @@ export async function getLabels() {
 }
 
 /**
- * Get model metadata (hash, training date, accuracy, etc.)
- * Returns null if the model is not yet initialized.
+ * Get model metadata (hash, training date, accuracy, etc.).
+ *
+ * Returns `null` only when the classifier has not been initialized (or has
+ * been `reset()`). Once initialized this always returns an object; individual
+ * fields are `null` only when the corresponding key is missing from
+ * `config.json` (legitimate `0` / `""` values are preserved).
+ *
  * @returns {Object|null}
  */
 export function getModelInfo() {
   if (!isInitialized || !modelConfig) return null;
+  // `??` (not `||`) so legitimate falsy values such as
+  // `validation_accuracy: 0` survive instead of being coerced to `null`.
   return {
-    modelHash: modelConfig.model_hash || null,
-    trainedAt: modelConfig.trained_at || null,
-    trainingSamples: modelConfig.training_samples || null,
-    validationAccuracy: modelConfig.validation_accuracy || null,
+    modelHash: modelConfig.model_hash ?? null,
+    trainedAt: modelConfig.trained_at ?? null,
+    trainingSamples: modelConfig.training_samples ?? null,
+    validationAccuracy: modelConfig.validation_accuracy ?? null,
   };
 }
 
@@ -771,10 +799,13 @@ export function reset() {
 }
 
 /**
- * Reload the model, optionally from a new path.
- * Resets all state and re-initializes. Safe to call while classify()
- * calls are in flight -- they will use the old model until the new
- * one is ready, then subsequent calls use the new model.
+ * Reload the model, optionally from a new path. Resets all state and
+ * re-initializes from disk.
+ *
+ * Not safe to call concurrently with `classify()`: `reload()` synchronously
+ * drops the current weights/vocab/labels, so any classification past its
+ * `await initialize()` line will throw. Await all pending classifications
+ * before reloading.
  *
  * @param {Object} [options] - Configuration options
  * @param {string} [options.modelPath] - New model directory path. If omitted,

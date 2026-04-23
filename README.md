@@ -119,9 +119,11 @@ await reload();
 await reload({ modelPath: "/path/to/new-model" });
 ```
 
+> **Note:** `reload()` is not safe to call concurrently with `classify()` — it synchronously drops the current model state. Await any pending classifications before reloading.
+
 ### `getModelInfo(): ModelInfo | null`
 
-Get metadata about the loaded model. Returns `null` if not yet initialized.
+Get metadata about the loaded model. Returns `null` only before initialization (or after `reset()`); once initialized always returns an object whose individual fields are `null` only when the corresponding key is missing from `config.json`.
 
 ```javascript
 const info = getModelInfo();
@@ -212,7 +214,7 @@ const info = getModelInfo();
 console.log(info.modelHash); // '6b6a2c75307d59bf'
 ```
 
-The model directory must contain `vocab.json`, `labels.json`, `group1-shard1of1.bin`, and `model.json`. The optional `config.json` provides metadata exposed through `getModelInfo()`.
+The model directory must contain `vocab.json`, `labels.json`, and `group1-shard1of1.bin`. The optional `config.json` provides metadata exposed through `getModelInfo()`. (`model.json`, kept for TensorFlow.js compatibility, is shipped alongside the model but is not loaded by this pure-JS implementation.)
 
 ## SMTP Code Fallback
 

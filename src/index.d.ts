@@ -172,8 +172,12 @@ export function classify(message: string): Promise<ClassificationResult>;
 export function getLabels(): Promise<BounceLabel[]>;
 
 /**
- * Get model metadata (hash, training date, accuracy, etc.)
- * Returns null if the model is not yet initialized.
+ * Get model metadata (hash, training date, accuracy, etc.).
+ *
+ * Returns `null` only when the classifier has not been initialized (or has
+ * been `reset()`). Once initialized this always returns an object; individual
+ * fields are `null` only when the corresponding key is missing from
+ * `config.json`.
  */
 export function getModelInfo(): ModelInfo | null;
 
@@ -188,10 +192,14 @@ export function isReady(): boolean;
 export function reset(): void;
 
 /**
- * Reload the model, optionally from a new path.
- * Resets all state and re-initializes. Safe to call while the
- * classifier is in use -- subsequent classify() calls will use
- * the new model once loading completes.
+ * Reload the model, optionally from a new path. Resets all state and
+ * re-initializes from disk.
+ *
+ * Not safe to call concurrently with `classify()`: `reload()` synchronously
+ * drops the current model state, so any classification past its
+ * `await initialize()` line will throw. Await all pending classifications
+ * before reloading.
+ *
  * @param options - Optional configuration. If modelPath is omitted,
  *   reloads from the previously used path.
  */
@@ -214,11 +222,12 @@ export function identifyBlocklist(
 ): BlocklistInfo | MultipleBlocklistInfo | null;
 
 /**
- * Get recommended action based on bounce category
+ * Get recommended action based on bounce category. Unknown categories
+ * (anything not in `ACTION_MAP`) fall back to `"review"`.
  * @param category - The bounce category/label
  * @returns Recommended action
  */
-export function getAction(category: BounceLabel): BounceAction;
+export function getAction(category: BounceLabel | string): BounceAction;
 
 /**
  * Extract SMTP codes from a message

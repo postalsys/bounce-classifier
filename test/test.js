@@ -5,6 +5,16 @@
 
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert";
+import {
+  mkdtempSync,
+  rmSync,
+  copyFileSync,
+  writeFileSync,
+  readdirSync,
+} from "node:fs";
+import { join, resolve, dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import {
   classify,
@@ -12,6 +22,8 @@ import {
   getLabels,
   isReady,
   reset,
+  reload,
+  getModelInfo,
   extractSmtpCodes,
   extractRetryTiming,
   identifyBlocklist,
@@ -24,6 +36,30 @@ import {
   BLOCKLIST_PATTERNS,
   CODE_FALLBACK_THRESHOLD,
 } from "../src/index.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const MODEL_DIR = resolve(__dirname, "..", "model");
+
+/**
+ * Build a temporary model dir that mirrors `model/`, with config.json
+ * replaced by the supplied object. Returns { path, cleanup }.
+ */
+function makeTmpModel(configOverride) {
+  const tmp = mkdtempSync(join(tmpdir(), "bounce-test-"));
+  for (const file of readdirSync(MODEL_DIR)) {
+    if (file === "config.json") continue;
+    copyFileSync(join(MODEL_DIR, file), join(tmp, file));
+  }
+  writeFileSync(
+    join(tmp, "config.json"),
+    JSON.stringify(configOverride),
+    "utf8",
+  );
+  return {
+    path: tmp,
+    cleanup: () => rmSync(tmp, { recursive: true, force: true }),
+  };
+}
 
 describe("Helper Functions", () => {
   describe("extractSmtpCodes", () => {
@@ -60,6 +96,27 @@ describe("Helper Functions", () => {
     it("should extract extended codes with multi-digit subparts", () => {
       const result = extractSmtpCodes("550 5.7.23 SPF validation failed");
       assert.strictEqual(result.extendedCode, "5.7.23");
+    });
+
+    it("should not extract IPv4 first three octets as extended code", () => {
+      // Regression: prior to fix, `5.7.1.100` yielded `5.7.1`, causing the
+      // SMTP-code fallback to misclassify the bounce as policy_blocked.
+      const a = extractSmtpCodes("550 IP 5.7.1.100 is blacklisted");
+      assert.strictEqual(a.extendedCode, null);
+      assert.strictEqual(a.mainCode, "550");
+
+      const b = extractSmtpCodes("Server at 5.2.2.50 rejected");
+      assert.strictEqual(b.extendedCode, null);
+
+      const c = extractSmtpCodes("IP 4.7.0.50 blocked");
+      assert.strictEqual(c.extendedCode, null);
+
+      const d = extractSmtpCodes("550 5.7.1.0 not a code");
+      assert.strictEqual(d.extendedCode, null);
+
+      // Sanity: a real code adjacent to other text still works.
+      const e = extractSmtpCodes("v1.2 5.7.1 result");
+      assert.strictEqual(e.extendedCode, "5.7.1");
     });
   });
 
@@ -1004,6 +1061,101 @@ describe("Score validation", () => {
         score >= 0 && score <= 1,
         `Score for ${label} is ${score}, expected 0-1`,
       );
+    }
+  });
+});
+
+describe("getModelInfo", () => {
+  afterEach(() => {
+    reset();
+  });
+
+  it("should return null before initialization", () => {
+    reset();
+    assert.strictEqual(getModelInfo(), null);
+  });
+
+  it("should return an object with the expected shape after init", async () => {
+    await initialize();
+    const info = getModelInfo();
+    assert.ok(info && typeof info === "object", "expected object");
+    for (const key of [
+      "modelHash",
+      "trainedAt",
+      "trainingSamples",
+      "validationAccuracy",
+    ]) {
+      assert.ok(key in info, `missing key: ${key}`);
+    }
+  });
+
+  it("should preserve falsy-but-valid config values (0, empty string)", async () => {
+    // Regression: prior implementation used `||`, coercing these to null.
+    const tmp = makeTmpModel({
+      model_hash: "",
+      trained_at: "1970-01-01T00:00:00Z",
+      training_samples: 0,
+      validation_accuracy: 0,
+    });
+    try {
+      await initialize({ modelPath: tmp.path });
+      const info = getModelInfo();
+      assert.strictEqual(info.modelHash, "");
+      assert.strictEqual(info.trainingSamples, 0);
+      assert.strictEqual(info.validationAccuracy, 0);
+      assert.strictEqual(info.trainedAt, "1970-01-01T00:00:00Z");
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("should fill all fields with null when config.json is missing", async () => {
+    // makeTmpModel writes a config.json by default; here we explicitly
+    // create one with an empty object, equivalent to "no metadata supplied".
+    const tmp = makeTmpModel({});
+    try {
+      await initialize({ modelPath: tmp.path });
+      const info = getModelInfo();
+      assert.strictEqual(info.modelHash, null);
+      assert.strictEqual(info.trainedAt, null);
+      assert.strictEqual(info.trainingSamples, null);
+      assert.strictEqual(info.validationAccuracy, null);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+});
+
+describe("reload", () => {
+  afterEach(() => {
+    reset();
+  });
+
+  it("should re-initialize with the previously used path when called with no args", async () => {
+    await initialize();
+    assert.strictEqual(isReady(), true);
+    await reload();
+    assert.strictEqual(isReady(), true);
+    // Classification still works after reload.
+    const result = await classify("550 5.1.1 User unknown");
+    assert.ok(result.label);
+  });
+
+  it("should switch to a different model path when one is supplied", async () => {
+    await initialize();
+    const tmp = makeTmpModel({
+      model_hash: "tmp-hash-deadbeef",
+      trained_at: "2099-01-01T00:00:00Z",
+      training_samples: 42,
+      validation_accuracy: 0.5,
+    });
+    try {
+      await reload({ modelPath: tmp.path });
+      const info = getModelInfo();
+      assert.strictEqual(info.modelHash, "tmp-hash-deadbeef");
+      assert.strictEqual(info.trainingSamples, 42);
+    } finally {
+      tmp.cleanup();
     }
   });
 });
