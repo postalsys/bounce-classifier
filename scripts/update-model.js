@@ -20,7 +20,6 @@ import {
   rmSync,
   readdirSync,
   copyFileSync,
-  existsSync,
 } from "fs";
 import { join, resolve, dirname } from "path";
 import { tmpdir } from "os";
@@ -30,9 +29,7 @@ import { execSync } from "child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MODEL_DIR = resolve(__dirname, "..", "model");
-if (!existsSync(MODEL_DIR)) {
-  mkdirSync(MODEL_DIR, { recursive: true });
-}
+mkdirSync(MODEL_DIR, { recursive: true });
 const BASE_URL =
   process.env.BOUNCE_TRAINER_URL || "https://bounces.postalsys.com";
 

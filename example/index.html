@@ -300,7 +300,12 @@
           const result = await classify(message);
           displayResult(result, message);
         } catch (error) {
-          resultContentEl.innerHTML = `<div class="error-box">Error: ${error.message}</div>`;
+          // textContent (not innerHTML) — error.message can include the
+          // user's input verbatim and must not be parsed as HTML.
+          const box = document.createElement("div");
+          box.className = "error-box";
+          box.textContent = `Error: ${error.message}`;
+          resultContentEl.replaceChildren(box);
           resultEl.classList.add("visible");
         } finally {
           classifyBtn.disabled = false;

@@ -12,6 +12,10 @@ const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
 const EMBEDDING_DIM = 64;
 const HIDDEN_DIM = 64;
 const NUM_LABELS = 16;
+const UNKNOWN_LABEL = "unknown";
+// Blocklist names that match almost any "blocked" message and would crowd
+// out a more specific provider hit if they appeared in the result.
+const GENERIC_BLOCKLIST_NAMES = new Set(["RBL", "DNSBL", "Blocklist"]);
 
 // Detect environment
 const isBrowser =
@@ -250,16 +254,9 @@ export function getTextBasedFallback(message) {
 }
 
 /**
- * Get fallback classification based on SMTP codes
+ * Get fallback classification based on SMTP codes alone (no text scan).
  */
-export function getCodeBasedFallback(message) {
-  // First try text-based patterns (more specific)
-  const textFallback = getTextBasedFallback(message);
-  if (textFallback) {
-    return textFallback;
-  }
-
-  // Then try SMTP codes
+function getSmtpCodeFallback(message) {
   const codes = extractSmtpCodes(message);
   if (codes.extendedCode && SMTP_CODE_MAP[codes.extendedCode]) {
     return SMTP_CODE_MAP[codes.extendedCode];
@@ -268,6 +265,14 @@ export function getCodeBasedFallback(message) {
     return SMTP_MAIN_CODE_MAP[codes.mainCode];
   }
   return null;
+}
+
+/**
+ * Get fallback classification: text patterns first (more specific), then
+ * SMTP codes.
+ */
+export function getCodeBasedFallback(message) {
+  return getTextBasedFallback(message) ?? getSmtpCodeFallback(message);
 }
 
 // Retry timing patterns
@@ -345,9 +350,7 @@ export function identifyBlocklist(message) {
     }
   }
   if (found.length === 0) return null;
-  const specific = found.filter(
-    (b) => !["RBL", "DNSBL", "Blocklist"].includes(b.name),
-  );
+  const specific = found.filter((b) => !GENERIC_BLOCKLIST_NAMES.has(b.name));
   if (specific.length > 0) {
     return specific.length === 1 ? specific[0] : { lists: specific };
   }
@@ -430,56 +433,40 @@ function tokenize(text) {
 }
 
 /**
- * Load JSON file (works in both browser and Node.js)
+ * Load a model file in either Node.js or the browser. The `parser` decides
+ * how to interpret the bytes; errors are tagged with `modelBasePath` so a
+ * misconfigured path is diagnosable.
  */
-async function loadJson(filePath) {
-  if (isBrowser) {
-    const response = await fetch(filePath);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch ${filePath} (model path: ${modelBasePath}): ${response.status}`,
-      );
+async function loadModelFile(filePath, parser) {
+  try {
+    if (isBrowser) {
+      const response = await fetch(filePath);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return parser.browser(response);
     }
-    return response.json();
-  } else {
     await loadNodeModules();
-    try {
-      return JSON.parse(await _fs.promises.readFile(filePath, "utf8"));
-    } catch (err) {
-      err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
-      throw err;
-    }
+    return parser.node(await _fs.promises.readFile(filePath));
+  } catch (err) {
+    err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
+    throw err;
   }
 }
 
-/**
- * Load binary weights file
- */
-async function loadWeights(filePath) {
-  if (isBrowser) {
-    const response = await fetch(filePath);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch ${filePath} (model path: ${modelBasePath}): ${response.status}`,
-      );
-    }
-    const buffer = await response.arrayBuffer();
-    return new Float32Array(buffer);
-  } else {
-    await loadNodeModules();
-    try {
-      const buffer = await _fs.promises.readFile(filePath);
-      return new Float32Array(
-        buffer.buffer,
-        buffer.byteOffset,
-        buffer.byteLength / 4,
-      );
-    } catch (err) {
-      err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
-      throw err;
-    }
-  }
-}
+const JSON_PARSER = {
+  browser: (response) => response.json(),
+  node: (buffer) => JSON.parse(buffer.toString("utf8")),
+};
+
+const WEIGHTS_PARSER = {
+  browser: async (response) => new Float32Array(await response.arrayBuffer()),
+  node: (buffer) =>
+    new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4),
+};
+
+const loadJson = (filePath) => loadModelFile(filePath, JSON_PARSER);
+const loadWeights = (filePath) => loadModelFile(filePath, WEIGHTS_PARSER);
 
 /**
  * Parse weights from binary data according to model structure
@@ -531,13 +518,25 @@ function relu(x) {
 }
 
 /**
- * Softmax activation function
+ * Softmax activation function. Single-pass over `arr`: find max, then
+ * compute exponents/sum/normalize in one allocated output buffer.
  */
 function softmax(arr) {
-  const max = Math.max(...arr);
-  const exps = arr.map((x) => Math.exp(x - max));
-  const sum = exps.reduce((a, b) => a + b, 0);
-  return exps.map((e) => e / sum);
+  let max = -Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] > max) max = arr[i];
+  }
+  const out = new Float32Array(arr.length);
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const e = Math.exp(arr[i] - max);
+    out[i] = e;
+    sum += e;
+  }
+  for (let i = 0; i < arr.length; i++) {
+    out[i] /= sum;
+  }
+  return out;
 }
 
 /**
@@ -545,10 +544,10 @@ function softmax(arr) {
  * Architecture: Embedding -> GlobalAveragePooling1D -> Dense(64, relu) -> Dense(16, softmax)
  */
 function forward(tokens) {
-  // Embedding lookup and global average pooling combined
-  // Note: GlobalAveragePooling1D averages over ALL timesteps (including padding)
-  // since the embedding layer has mask_zero=False
-  const pooled = new Float32Array(EMBEDDING_DIM).fill(0);
+  // Embedding lookup and global average pooling combined.
+  // GlobalAveragePooling1D averages over ALL timesteps (including padding)
+  // because the trained embedding layer has mask_zero=False.
+  const pooled = new Float32Array(EMBEDDING_DIM);
 
   for (let i = 0; i < tokens.length; i++) {
     const tokenId = tokens[i];
@@ -713,14 +712,16 @@ export async function classify(message) {
   let label = labels.id_to_label[maxIndex];
   let usedFallback = false;
 
-  // Text patterns take priority (most reliable for specific phrases)
+  // Text patterns take priority (most reliable for specific phrases).
+  // If they don't match and the model is uncertain (or punted to "unknown"),
+  // try the SMTP-code map directly — getSmtpCodeFallback skips re-running
+  // the text patterns we already proved don't match.
   const textFallback = getTextBasedFallback(message);
   if (textFallback) {
     label = textFallback;
     usedFallback = true;
-  } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === "unknown") {
-    // Use SMTP code fallback if confidence is low or result is "unknown"
-    const codeFallback = getCodeBasedFallback(message);
+  } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === UNKNOWN_LABEL) {
+    const codeFallback = getSmtpCodeFallback(message);
     if (codeFallback) {
       label = codeFallback;
       usedFallback = true;
@@ -766,8 +767,7 @@ export async function getLabels() {
  */
 export function getModelInfo() {
   if (!isInitialized || !modelConfig) return null;
-  // `??` (not `||`) so legitimate falsy values such as
-  // `validation_accuracy: 0` survive instead of being coerced to `null`.
+  // `??` preserves legitimate falsy values (0 for accuracy, "" for hash).
   return {
     modelHash: modelConfig.model_hash ?? null,
     trainedAt: modelConfig.trained_at ?? null,
