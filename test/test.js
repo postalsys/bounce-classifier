@@ -18,12 +18,15 @@ import { fileURLToPath } from "node:url";
 
 import {
   classify,
+  classifyBatch,
   initialize,
   getLabels,
   isReady,
   reset,
   reload,
   getModelInfo,
+  registerTextFallback,
+  clearTextFallbacks,
   extractSmtpCodes,
   extractRetryTiming,
   identifyBlocklist,
@@ -1070,15 +1073,22 @@ describe("getModelInfo", () => {
     reset();
   });
 
-  it("should return null before initialization", () => {
+  it("should return an object with all nulls before initialization", () => {
     reset();
-    assert.strictEqual(getModelInfo(), null);
+    const info = getModelInfo();
+    assert.ok(info && typeof info === "object", "expected object");
+    assert.strictEqual(info.initialized, false);
+    assert.strictEqual(info.modelHash, null);
+    assert.strictEqual(info.trainedAt, null);
+    assert.strictEqual(info.trainingSamples, null);
+    assert.strictEqual(info.validationAccuracy, null);
   });
 
   it("should return an object with the expected shape after init", async () => {
     await initialize();
     const info = getModelInfo();
     assert.ok(info && typeof info === "object", "expected object");
+    assert.strictEqual(info.initialized, true);
     for (const key of [
       "modelHash",
       "trainedAt",
@@ -1156,6 +1166,144 @@ describe("reload", () => {
       assert.strictEqual(info.trainingSamples, 42);
     } finally {
       tmp.cleanup();
+    }
+  });
+
+  it("should wait for in-flight classify() calls before swapping", async () => {
+    await initialize();
+    const messages = Array.from(
+      { length: 20 },
+      (_, i) => `550 5.1.1 User ${i} unknown`,
+    );
+    const promises = messages.map((m) => classify(m));
+    // Fire reload while the above are still scheduled; all must resolve.
+    await reload();
+    const results = await Promise.all(promises);
+    assert.strictEqual(results.length, messages.length);
+    for (const r of results) assert.ok(r.label);
+    assert.strictEqual(isReady(), true);
+  });
+});
+
+describe("classifyBatch", () => {
+  before(async () => {
+    await initialize();
+  });
+
+  after(() => {
+    reset();
+  });
+
+  it("should classify a batch of messages", async () => {
+    const results = await classifyBatch([
+      "550 5.1.1 User unknown",
+      "552 5.2.2 Over quota",
+      "421 4.7.0 Try again later",
+    ]);
+    assert.strictEqual(results.length, 3);
+    for (const r of results) {
+      assert.ok(r.label);
+      assert.ok(typeof r.confidence === "number");
+      assert.ok(r.action);
+    }
+  });
+
+  it("should return empty array for empty input", async () => {
+    const results = await classifyBatch([]);
+    assert.deepStrictEqual(results, []);
+  });
+
+  it("should throw on non-array input", async () => {
+    await assert.rejects(
+      async () => classifyBatch("not an array"),
+      /expected an array/,
+    );
+    await assert.rejects(
+      async () => classifyBatch(null),
+      /expected an array/,
+    );
+  });
+
+  it("should surface per-item error with .index", async () => {
+    let caught;
+    try {
+      await classifyBatch(["valid message", "", "also valid"]);
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught, "expected error");
+    assert.strictEqual(caught.index, 1);
+    assert.match(caught.message, /classifyBatch\[1\]/);
+  });
+});
+
+describe("registerTextFallback / clearTextFallbacks", () => {
+  before(async () => {
+    await initialize();
+  });
+
+  afterEach(() => {
+    clearTextFallbacks();
+  });
+
+  after(() => {
+    reset();
+  });
+
+  it("should let a user pattern override built-in classification", async () => {
+    const msg = "XYZZY-PROVIDER-42: bounce for unknown reason";
+    registerTextFallback({ pattern: /XYZZY-PROVIDER-\d+/, label: "spam_blocked" });
+    const result = await classify(msg);
+    assert.strictEqual(result.label, "spam_blocked");
+    assert.strictEqual(result.usedFallback, true);
+  });
+
+  it("should scan user patterns before built-ins", () => {
+    registerTextFallback({ pattern: /user unknown/i, label: "spam_blocked" });
+    assert.strictEqual(getTextBasedFallback("User unknown"), "spam_blocked");
+  });
+
+  it("should reject invalid patterns", () => {
+    assert.throws(
+      () => registerTextFallback({ pattern: "not a regex", label: "unknown" }),
+      /pattern must be a RegExp/,
+    );
+    assert.throws(
+      () => registerTextFallback({ pattern: /x/, label: "" }),
+      /label must be a non-empty string/,
+    );
+    assert.throws(
+      () => registerTextFallback(null),
+      /expected \{ pattern, label \} object/,
+    );
+  });
+
+  it("should restore built-in behavior after clearTextFallbacks", () => {
+    registerTextFallback({ pattern: /user unknown/i, label: "spam_blocked" });
+    assert.strictEqual(getTextBasedFallback("User unknown"), "spam_blocked");
+    clearTextFallbacks();
+    assert.strictEqual(getTextBasedFallback("User unknown"), "user_unknown");
+  });
+});
+
+describe("initialize onProgress", () => {
+  afterEach(() => {
+    reset();
+  });
+
+  it("should fire progress events for each phase", async () => {
+    const events = [];
+    await initialize({ onProgress: (p) => events.push(p) });
+    const phases = new Set(events.map((e) => e.phase));
+    // All four phases should be seen at least once.
+    for (const expected of ["vocab", "labels", "weights", "config"]) {
+      assert.ok(phases.has(expected), `missing phase: ${expected}`);
+    }
+    // Every event has the expected shape.
+    for (const e of events) {
+      assert.ok(typeof e.loaded === "number");
+      assert.ok(typeof e.total === "number");
+      assert.ok(e.loaded <= e.total);
     }
   });
 });

@@ -14,13 +14,14 @@ export default [
         console: "readonly",
         __filename: "readonly",
         __dirname: "readonly",
-        // Browser globals
+        // Browser globals (also available in Node >=18)
         window: "readonly",
         document: "readonly",
         fetch: "readonly",
         URL: "readonly",
         Uint8Array: "readonly",
         ArrayBuffer: "readonly",
+        Blob: "readonly",
       },
     },
     rules: {

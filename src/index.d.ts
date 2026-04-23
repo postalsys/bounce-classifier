@@ -104,11 +104,39 @@ export interface SmtpCodes {
 }
 
 /**
+ * Progress event emitted during model initialization.
+ */
+export interface InitProgress {
+  /** Which resource is loading. */
+  phase: "vocab" | "labels" | "weights" | "config";
+  /** Bytes loaded so far for this phase (or an opaque count for JSON phases). */
+  loaded: number;
+  /** Total bytes / units for this phase. May equal `loaded` when unknown. */
+  total: number;
+}
+
+/**
  * Initialization options
  */
 export interface InitializeOptions {
   /** Path or URL to model directory (optional, uses default if not provided) */
   modelPath?: string;
+  /**
+   * Optional progress callback. In the browser, the "weights" phase streams
+   * the response body and fires multiple events with monotonically increasing
+   * `loaded`; other phases fire once at completion.
+   */
+  onProgress?: (progress: InitProgress) => void;
+}
+
+/**
+ * User-registered text-pattern fallback entry.
+ */
+export interface TextFallbackEntry {
+  /** Regex to test against the bounce message. */
+  pattern: RegExp;
+  /** Label to assign when the pattern matches. Must be a non-empty string. */
+  label: string;
 }
 
 /**
@@ -123,6 +151,8 @@ export interface ModelInfo {
   trainingSamples: number | null;
   /** Validation accuracy from training (0-1), or null */
   validationAccuracy: number | null;
+  /** Whether the classifier has been initialized. Metadata fields are null if false. */
+  initialized: boolean;
 }
 
 /**
@@ -166,20 +196,40 @@ export function initialize(options?: InitializeOptions): Promise<void>;
 export function classify(message: string): Promise<ClassificationResult>;
 
 /**
+ * Classify an array of bounce messages. Sequential today; the API is
+ * reserved for future vectorization. Per-item errors include an `.index`
+ * property identifying the failing message.
+ */
+export function classifyBatch(
+  messages: string[],
+): Promise<ClassificationResult[]>;
+
+/**
+ * Register a custom text-pattern fallback. User-registered patterns are
+ * scanned before the built-in patterns and override default classification
+ * when they match. Survives `reset()` / `reload()`; clear with
+ * `clearTextFallbacks()`.
+ */
+export function registerTextFallback(entry: TextFallbackEntry): void;
+
+/**
+ * Remove all user-registered text-pattern fallbacks. Built-in fallbacks
+ * are not affected.
+ */
+export function clearTextFallbacks(): void;
+
+/**
  * Get list of all possible labels
  * @returns Array of label names
  */
 export function getLabels(): Promise<BounceLabel[]>;
 
 /**
- * Get model metadata (hash, training date, accuracy, etc.).
- *
- * Returns `null` only when the classifier has not been initialized (or has
- * been `reset()`). Once initialized this always returns an object; individual
- * fields are `null` only when the corresponding key is missing from
- * `config.json`.
+ * Get model metadata (hash, training date, accuracy, etc.). Always returns
+ * an object; use the `initialized` flag to distinguish an uninitialized
+ * classifier from one whose `config.json` omits individual fields.
  */
-export function getModelInfo(): ModelInfo | null;
+export function getModelInfo(): ModelInfo;
 
 /**
  * Check if the classifier is initialized
@@ -192,13 +242,9 @@ export function isReady(): boolean;
 export function reset(): void;
 
 /**
- * Reload the model, optionally from a new path. Resets all state and
- * re-initializes from disk.
- *
- * Not safe to call concurrently with `classify()`: `reload()` synchronously
- * drops the current model state, so any classification past its
- * `await initialize()` line will throw. Await all pending classifications
- * before reloading.
+ * Reload the model, optionally from a new path. Waits for any in-flight
+ * `classify()` calls to drain before swapping state, then re-initializes
+ * from disk. Safe to call concurrently with `classify()`.
  *
  * @param options - Optional configuration. If modelPath is omitted,
  *   reloads from the previously used path.
@@ -255,12 +301,15 @@ export function getTextBasedFallback(message: string): BounceLabel | null;
  */
 declare const bounceClassifier: {
   classify: typeof classify;
+  classifyBatch: typeof classifyBatch;
   getLabels: typeof getLabels;
   initialize: typeof initialize;
   isReady: typeof isReady;
   getModelInfo: typeof getModelInfo;
   reset: typeof reset;
   reload: typeof reload;
+  registerTextFallback: typeof registerTextFallback;
+  clearTextFallbacks: typeof clearTextFallbacks;
   extractRetryTiming: typeof extractRetryTiming;
   identifyBlocklist: typeof identifyBlocklist;
   getAction: typeof getAction;

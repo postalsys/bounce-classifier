@@ -210,6 +210,42 @@ export function extractSmtpCodes(message) {
   return result;
 }
 
+// User-registered text pattern fallbacks. Scanned BEFORE the built-ins so
+// project-specific bounces (e.g. custom providers) can override default
+// classification without forking. Survives `reset()` / `reload()`; cleared
+// only via `clearTextFallbacks()`.
+const USER_TEXT_FALLBACKS = [];
+
+/**
+ * Register a custom text-pattern fallback. User-registered patterns are
+ * scanned before the built-in patterns, so they can override defaults.
+ *
+ * @param {Object} entry
+ * @param {RegExp} entry.pattern - Regex to test against the message.
+ * @param {string} entry.label - Label to assign when the pattern matches.
+ */
+export function registerTextFallback(entry) {
+  if (!entry || typeof entry !== "object") {
+    throw new Error("registerTextFallback: expected { pattern, label } object");
+  }
+  const { pattern, label } = entry;
+  if (!(pattern instanceof RegExp)) {
+    throw new Error("registerTextFallback: pattern must be a RegExp");
+  }
+  if (typeof label !== "string" || label.length === 0) {
+    throw new Error("registerTextFallback: label must be a non-empty string");
+  }
+  USER_TEXT_FALLBACKS.push({ pattern, label });
+}
+
+/**
+ * Remove all user-registered text-pattern fallbacks. Built-in fallbacks
+ * are not affected.
+ */
+export function clearTextFallbacks() {
+  USER_TEXT_FALLBACKS.length = 0;
+}
+
 // Text-based pattern fallbacks for common patterns
 // Note: .{0,100}? limits match length to prevent performance issues on long strings
 const TEXT_PATTERN_FALLBACKS = [
@@ -242,13 +278,16 @@ const TEXT_PATTERN_FALLBACKS = [
 ];
 
 /**
- * Get fallback classification based on text patterns
+ * Get fallback classification based on text patterns. User-registered
+ * patterns (via `registerTextFallback`) are scanned first; built-ins
+ * second.
  */
 export function getTextBasedFallback(message) {
+  for (const { pattern, label } of USER_TEXT_FALLBACKS) {
+    if (pattern.test(message)) return label;
+  }
   for (const { pattern, label } of TEXT_PATTERN_FALLBACKS) {
-    if (pattern.test(message)) {
-      return label;
-    }
+    if (pattern.test(message)) return label;
   }
   return null;
 }
@@ -401,6 +440,26 @@ let isInitialized = false;
 let initPromise = null;
 let modelBasePath = null;
 
+// Concurrency tracking: `reload()` must wait for in-flight `classify()` calls
+// to finish before swapping model state, otherwise a classification past its
+// `await initialize()` line would read null weights and crash.
+let inFlightClassifies = 0;
+let drainWaiters = [];
+
+function endClassify() {
+  inFlightClassifies--;
+  if (inFlightClassifies === 0 && drainWaiters.length > 0) {
+    const waiters = drainWaiters;
+    drainWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+}
+
+function waitForClassifyDrain() {
+  if (inFlightClassifies === 0) return Promise.resolve();
+  return new Promise((resolve) => drainWaiters.push(resolve));
+}
+
 /**
  * Preprocess text for tokenization
  */
@@ -467,6 +526,50 @@ const WEIGHTS_PARSER = {
 
 const loadJson = (filePath) => loadModelFile(filePath, JSON_PARSER);
 const loadWeights = (filePath) => loadModelFile(filePath, WEIGHTS_PARSER);
+
+/**
+ * Load weights with incremental progress reporting. Uses a streaming
+ * `ReadableStream` reader in the browser (so large model downloads show a
+ * determinate bar); Node falls back to a single "done" ping after readFile.
+ * Non-streaming paths delegate to `WEIGHTS_PARSER` so there's one Float32
+ * conversion, not two.
+ */
+async function loadWeightsWithProgress(filePath, onProgress) {
+  const emit = (loaded, total) =>
+    onProgress({ phase: "weights", loaded, total });
+  try {
+    if (isBrowser) {
+      const response = await fetch(filePath);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const total = Number(response.headers.get("Content-Length")) || 0;
+      if (!response.body?.getReader) {
+        const result = await WEIGHTS_PARSER.browser(response);
+        emit(result.byteLength, total || result.byteLength);
+        return result;
+      }
+      const reader = response.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        emit(loaded, total);
+      }
+      // Blob concatenates chunks natively; avoids a JS-side copy loop.
+      const buf = await new Blob(chunks).arrayBuffer();
+      return new Float32Array(buf);
+    }
+    await loadNodeModules();
+    const buf = await _fs.promises.readFile(filePath);
+    emit(buf.byteLength, buf.byteLength);
+    return WEIGHTS_PARSER.node(buf);
+  } catch (err) {
+    err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
+    throw err;
+  }
+}
 
 /**
  * Parse weights from binary data according to model structure
@@ -616,7 +719,12 @@ async function getDefaultModelPath() {
 /**
  * Initialize the classifier
  * @param {Object} options - Configuration options
- * @param {string} options.modelPath - Path or URL to model directory (optional)
+ * @param {string} [options.modelPath] - Path or URL to model directory.
+ * @param {(p: {phase: string, loaded: number, total: number}) => void}
+ *   [options.onProgress] - Called repeatedly during model load. `phase` is
+ *   one of "vocab" | "labels" | "weights" | "config". In the browser, the
+ *   "weights" phase streams and fires multiple events with monotonically
+ *   increasing `loaded`; other phases fire once at completion.
  */
 export async function initialize(options = {}) {
   if (isInitialized) return;
@@ -633,6 +741,12 @@ export async function initialize(options = {}) {
       throw new Error("modelPath must not be empty");
     }
   }
+
+  const onProgress =
+    typeof options.onProgress === "function" ? options.onProgress : null;
+  const pingDone = (phase, bytes) => {
+    if (onProgress) onProgress({ phase, loaded: bytes, total: bytes });
+  };
 
   initPromise = (async () => {
     try {
@@ -654,14 +768,18 @@ export async function initialize(options = {}) {
       vocabData.forEach((word, index) => {
         vocabMap.set(word, index);
       });
+      pingDone("vocab", vocabData.length);
 
       // Load labels
       const labelsPath = joinPath(modelBasePath, "labels.json");
       labels = await loadJson(labelsPath);
+      pingDone("labels", Object.keys(labels.id_to_label || {}).length);
 
-      // Load weights
+      // Load weights (streaming with progress in the browser when requested)
       const weightsPath = joinPath(modelBasePath, "group1-shard1of1.bin");
-      const weightsData = await loadWeights(weightsPath);
+      const weightsData = onProgress
+        ? await loadWeightsWithProgress(weightsPath, onProgress)
+        : await loadWeights(weightsPath);
       weights = parseWeights(weightsData);
 
       // Load config (optional - older models may not have it)
@@ -671,6 +789,7 @@ export async function initialize(options = {}) {
       } catch {
         modelConfig = {};
       }
+      pingDone("config", 1);
 
       isInitialized = true;
     } catch (error) {
@@ -693,57 +812,93 @@ export async function classify(message) {
 
   message = sanitizeMessage(message);
 
-  const tokens = tokenize(message);
-  const scores = forward(tokens);
+  // Increment AFTER initialize() + sanitize so failed inputs don't count
+  // against the in-flight tally (and can't block a pending reload()).
+  inFlightClassifies++;
+  try {
+    const tokens = tokenize(message);
+    const scores = forward(tokens);
 
-  let maxScore = 0;
-  let maxIndex = 0;
-  const allScores = {};
+    let maxScore = 0;
+    let maxIndex = 0;
+    const allScores = {};
 
-  for (let i = 0; i < scores.length; i++) {
-    const labelName = labels.id_to_label[i];
-    allScores[labelName] = scores[i];
-    if (scores[i] > maxScore) {
-      maxScore = scores[i];
-      maxIndex = i;
+    for (let i = 0; i < scores.length; i++) {
+      const labelName = labels.id_to_label[i];
+      allScores[labelName] = scores[i];
+      if (scores[i] > maxScore) {
+        maxScore = scores[i];
+        maxIndex = i;
+      }
     }
-  }
 
-  let label = labels.id_to_label[maxIndex];
-  let usedFallback = false;
+    let label = labels.id_to_label[maxIndex];
+    let usedFallback = false;
 
-  // Text patterns take priority (most reliable for specific phrases).
-  // If they don't match and the model is uncertain (or punted to "unknown"),
-  // try the SMTP-code map directly — getSmtpCodeFallback skips re-running
-  // the text patterns we already proved don't match.
-  const textFallback = getTextBasedFallback(message);
-  if (textFallback) {
-    label = textFallback;
-    usedFallback = true;
-  } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === UNKNOWN_LABEL) {
-    const codeFallback = getSmtpCodeFallback(message);
-    if (codeFallback) {
-      label = codeFallback;
+    // Text patterns take priority (most reliable for specific phrases).
+    // If they don't match and the model is uncertain (or punted to "unknown"),
+    // try the SMTP-code map directly — getSmtpCodeFallback skips re-running
+    // the text patterns we already proved don't match.
+    const textFallback = getTextBasedFallback(message);
+    if (textFallback) {
+      label = textFallback;
       usedFallback = true;
+    } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === UNKNOWN_LABEL) {
+      const codeFallback = getSmtpCodeFallback(message);
+      if (codeFallback) {
+        label = codeFallback;
+        usedFallback = true;
+      }
+    }
+
+    const result = {
+      label,
+      confidence: maxScore,
+      action: getAction(label),
+      scores: allScores,
+    };
+
+    if (usedFallback) result.usedFallback = true;
+
+    const retryAfter = extractRetryTiming(message);
+    if (retryAfter !== null) result.retryAfter = retryAfter;
+
+    const blocklist = identifyBlocklist(message);
+    if (blocklist !== null) result.blocklist = blocklist;
+
+    return result;
+  } finally {
+    endClassify();
+  }
+}
+
+/**
+ * Classify a batch of bounce messages. Equivalent to calling `classify()`
+ * on each input sequentially after a single `initialize()`, but returns a
+ * contiguous array and wraps per-item errors with their `.index` so
+ * partial failures are diagnosable.
+ *
+ * @param {string[]} messages
+ * @returns {Promise<Object[]>}
+ */
+export async function classifyBatch(messages) {
+  if (!Array.isArray(messages)) {
+    throw new Error(
+      `classifyBatch: expected an array of messages, got ${typeof messages}`,
+    );
+  }
+  await initialize();
+  const results = new Array(messages.length);
+  for (let i = 0; i < messages.length; i++) {
+    try {
+      results[i] = await classify(messages[i]);
+    } catch (err) {
+      err.index = i;
+      err.message = `classifyBatch[${i}]: ${err.message}`;
+      throw err;
     }
   }
-
-  const result = {
-    label,
-    confidence: maxScore,
-    action: getAction(label),
-    scores: allScores,
-  };
-
-  if (usedFallback) result.usedFallback = true;
-
-  const retryAfter = extractRetryTiming(message);
-  if (retryAfter !== null) result.retryAfter = retryAfter;
-
-  const blocklist = identifyBlocklist(message);
-  if (blocklist !== null) result.blocklist = blocklist;
-
-  return result;
+  return results;
 }
 
 /**
@@ -758,21 +913,23 @@ export async function getLabels() {
 /**
  * Get model metadata (hash, training date, accuracy, etc.).
  *
- * Returns `null` only when the classifier has not been initialized (or has
- * been `reset()`). Once initialized this always returns an object; individual
- * fields are `null` only when the corresponding key is missing from
- * `config.json` (legitimate `0` / `""` values are preserved).
+ * Always returns an object. The `initialized` flag distinguishes an
+ * uninitialized classifier (all metadata fields null) from an initialized
+ * one with missing `config.json` entries. Legitimate falsy values from the
+ * config (0 for accuracy, "" for hash) are preserved.
  *
- * @returns {Object|null}
+ * @returns {{modelHash: string|null, trainedAt: string|null,
+ *   trainingSamples: number|null, validationAccuracy: number|null,
+ *   initialized: boolean}}
  */
 export function getModelInfo() {
-  if (!isInitialized || !modelConfig) return null;
-  // `??` preserves legitimate falsy values (0 for accuracy, "" for hash).
+  const src = isInitialized && modelConfig ? modelConfig : {};
   return {
-    modelHash: modelConfig.model_hash ?? null,
-    trainedAt: modelConfig.trained_at ?? null,
-    trainingSamples: modelConfig.training_samples ?? null,
-    validationAccuracy: modelConfig.validation_accuracy ?? null,
+    modelHash: src.model_hash ?? null,
+    trainedAt: src.trained_at ?? null,
+    trainingSamples: src.training_samples ?? null,
+    validationAccuracy: src.validation_accuracy ?? null,
+    initialized: isInitialized,
   };
 }
 
@@ -785,7 +942,10 @@ export function isReady() {
 }
 
 /**
- * Reset classifier state (for testing or re-initialization)
+ * Reset classifier state (for testing or re-initialization). Clears model
+ * state and the in-flight / drain bookkeeping, but leaves user-registered
+ * text fallbacks in place (those are user config, not model state; use
+ * `clearTextFallbacks()` to remove them).
  */
 export function reset() {
   weights = null;
@@ -796,37 +956,43 @@ export function reset() {
   initPromise = null;
   modelBasePath = null;
   cachedModelPath = null;
+  inFlightClassifies = 0;
+  drainWaiters = [];
 }
 
 /**
- * Reload the model, optionally from a new path. Resets all state and
- * re-initializes from disk.
+ * Reload the model, optionally from a new path. Waits for any in-flight
+ * `classify()` calls to drain before swapping state, then re-initializes
+ * from disk. Safe to call concurrently with `classify()` — pending
+ * classifications complete against the old model; subsequent calls see
+ * the new one.
  *
- * Not safe to call concurrently with `classify()`: `reload()` synchronously
- * drops the current weights/vocab/labels, so any classification past its
- * `await initialize()` line will throw. Await all pending classifications
- * before reloading.
- *
- * @param {Object} [options] - Configuration options
- * @param {string} [options.modelPath] - New model directory path. If omitted,
- *   reloads from the previously used path.
+ * @param {Object} [options]
+ * @param {string} [options.modelPath] - New model directory path. If
+ *   omitted, reloads from the previously used path.
+ * @param {Function} [options.onProgress] - Optional progress callback
+ *   (see `initialize()`).
  * @returns {Promise<void>}
  */
 export async function reload(options = {}) {
   const modelPath = options.modelPath ?? modelBasePath;
+  await waitForClassifyDrain();
   reset();
-  return initialize({ modelPath });
+  return initialize({ modelPath, onProgress: options.onProgress });
 }
 
 // Default export
 export default {
   classify,
+  classifyBatch,
   getLabels,
   initialize,
   isReady,
   getModelInfo,
   reset,
   reload,
+  registerTextFallback,
+  clearTextFallbacks,
   extractRetryTiming,
   identifyBlocklist,
   getAction,

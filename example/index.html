@@ -7,138 +7,187 @@
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: system-ui, -apple-system, sans-serif; background: #f9fafb; min-height: 100vh; line-height: 1.5; color: #111827; }
-      .container { max-width: 42rem; margin: 0 auto; padding: 1.5rem; }
+      .container { max-width: 44rem; margin: 0 auto; padding: 1.5rem; }
       h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
-      .subtitle { color: #6b7280; margin-bottom: 1.5rem; }
+      .subtitle { color: #6b7280; margin-bottom: 0.5rem; }
+      .subtitle a { color: #2563eb; }
+      .model-strip { display: block; font-size: 0.75rem; color: #9ca3af; margin-bottom: 1.25rem; font-family: ui-monospace, monospace; }
+      .model-strip code { background: #f3f4f6; padding: 0.1rem 0.35rem; border-radius: 0.25rem; color: #4b5563; }
+
       .status { display: none; margin-bottom: 1rem; padding: 1rem; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 0.5rem; }
       .status.visible { display: block; }
-      .form-group { margin-bottom: 1rem; }
+
+      .form-group { margin-bottom: 0.75rem; }
       label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem; }
-      textarea { width: 100%; height: 8rem; padding: 0.75rem 1rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.875rem; resize: vertical; outline: none; }
-      textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3); }
-      .btn { padding: 0.75rem 1.5rem; background: #2563eb; color: white; font-weight: 500; border: none; border-radius: 0.5rem; cursor: pointer; transition: background 0.15s; }
+      textarea { width: 100%; height: 8rem; padding: 0.75rem 1rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.875rem; resize: vertical; outline: none; background: white; }
+      textarea:focus-visible { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); }
+
+      .controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+      .hint { font-size: 0.75rem; color: #6b7280; }
+      .checkbox { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.875rem; color: #374151; cursor: pointer; user-select: none; }
+      .checkbox input { cursor: pointer; }
+
+      .btn { padding: 0.75rem 1.5rem; background: #2563eb; color: white; font-weight: 500; border: none; border-radius: 0.5rem; cursor: pointer; transition: background 0.15s; font-size: 0.9rem; }
       .btn:hover:not(:disabled) { background: #1d4ed8; }
-      .btn:disabled { background: #d1d5db; cursor: not-allowed; }
+      .btn:disabled { background: #9ca3af; cursor: not-allowed; }
+      .btn:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.4); outline-offset: 2px; }
+      .btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; padding: 0.5rem 0.9rem; font-size: 0.8rem; font-weight: 500; border-radius: 0.375rem; cursor: pointer; transition: background 0.15s; }
+      .btn-secondary:hover { background: #f9fafb; }
+      .btn-secondary:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.4); outline-offset: 2px; }
+
+      .inline-error { display: none; margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: #fef2f2; color: #b91c1c; border-radius: 0.375rem; font-size: 0.875rem; }
+      .inline-error.visible { display: block; }
+
       .result { display: none; margin-top: 1.5rem; padding: 1.25rem; background: white; border-radius: 0.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; }
       .result.visible { display: block; }
       .result h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: 1rem; }
+
+      /* Primary identity row: label (big, colored) + confidence pill */
+      .identity { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      .label-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 1rem; font-weight: 600; }
+      .label-badge .icon { font-size: 1.05rem; line-height: 1; }
+      .confidence-pill { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 500; background: #f3f4f6; color: #374151; }
+      .confidence-pill .bar { width: 3.5rem; height: 0.35rem; background: #e5e7eb; border-radius: 9999px; overflow: hidden; }
+      .confidence-pill .fill { height: 100%; background: #22c55e; border-radius: 9999px; }
+      .confidence-pill.low .fill { background: #f59e0b; }
+
+      /* Action recommendation — promoted to primary position */
+      .action-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; margin-bottom: 1rem; }
+      .action-card .action-label { font-size: 0.75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+      .action-card .action-value { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 1rem; font-weight: 600; color: #111827; }
+
+      .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+      .badge { display: inline-block; padding: 0.25rem 0.6rem; font-size: 0.75rem; border-radius: 0.25rem; font-weight: 500; }
+
+      /* Trainer CTA: always visible, escalated when low-confidence */
+      .trainer-cta { font-size: 0.8rem; color: #6b7280; margin-top: 0.75rem; }
+      .trainer-cta a { color: #2563eb; font-weight: 500; }
+      .trainer-callout { padding: 0.75rem 1rem; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 0.5rem; font-size: 0.875rem; margin-bottom: 1rem; }
+      .trainer-callout strong { color: #78350f; }
+      .trainer-callout a { color: #78350f; font-weight: 600; text-decoration: underline; }
+
+      /* JSON / code output panel */
+      .code-panel { margin-top: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+      .code-header { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 0.75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+      .code-body { padding: 0.75rem; background: #0f172a; color: #e2e8f0; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.5; }
+      .code-body pre { white-space: pre; }
+      .copy-ok { font-size: 0.75rem; color: #059669; margin-left: 0.5rem; }
+
+      /* Details accordion (kept for full score breakdown) */
+      .details-panel { margin-top: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+      .details-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.9rem; background: #f9fafb; border: none; cursor: pointer; text-align: left; font-size: 0.875rem; font-weight: 500; color: #374151; transition: background 0.15s; }
+      .details-toggle:hover { background: #f3f4f6; }
+      .details-toggle:focus-visible { outline: 2px solid #3b82f6; outline-offset: -2px; }
+      .details-toggle svg { width: 1rem; height: 1rem; color: #6b7280; transition: transform 0.15s; }
+      .details-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+      .details-content { display: none; padding: 0.75rem 0.9rem; border-top: 1px solid #e5e7eb; background: white; }
+      .details-content.visible { display: block; }
+
+      .scores-title { font-size: 0.75rem; font-weight: 500; color: #6b7280; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      .scores-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; }
+      @media (max-width: 480px) { .scores-grid { grid-template-columns: 1fr; } }
+      .score-item { display: flex; justify-content: space-between; padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 0.25rem; background: #f9fafb; }
+      .score-item.highlight { background: #f0fdf4; font-weight: 500; }
+      .score-item .name { color: #374151; }
+      .score-item .value { color: #6b7280; font-variant-numeric: tabular-nums; }
+
+      /* Batch result table */
+      .batch-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.75rem; }
+      .batch-table th { text-align: left; padding: 0.5rem 0.6rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 0.7rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.05em; font-weight: 500; }
+      .batch-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+      .batch-table .msg { font-family: ui-monospace, monospace; font-size: 0.75rem; color: #374151; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .batch-table .conf { font-variant-numeric: tabular-nums; color: #6b7280; }
+
       .examples { margin-top: 1.5rem; padding: 1rem; background: white; border-radius: 0.5rem; border: 1px solid #e5e7eb; }
       .examples h3 { font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.75rem; }
       .examples-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
       .example-btn { padding: 0.5rem 0.75rem; font-size: 0.75rem; background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; border-radius: 0.25rem; cursor: pointer; transition: background 0.15s; }
       .example-btn:hover { background: #e5e7eb; }
-      /* Result styles */
-      .label-badge { display: inline-block; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem; }
-      .action-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #f3f4f6; font-size: 0.875rem; }
-      .action-row .label { color: #6b7280; }
-      .action-row .value { font-weight: 500; }
-      .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
-      .badge { display: inline-block; padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 0.25rem; }
-      .details-panel { margin-top: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
-      .details-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #f9fafb; border: none; cursor: pointer; text-align: left; font-size: 0.875rem; font-weight: 500; color: #374151; transition: background 0.15s; }
-      .details-toggle:hover { background: #f3f4f6; }
-      .details-toggle svg { width: 1rem; height: 1rem; color: #6b7280; transition: transform 0.15s; }
-      .details-toggle.open svg { transform: rotate(180deg); }
-      .details-content { display: none; padding: 0.75rem 1rem; border-top: 1px solid #e5e7eb; }
-      .details-content.visible { display: block; }
-      .confidence-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; font-size: 0.875rem; }
-      .confidence-row .label { color: #6b7280; }
-      .confidence-bar-wrapper { display: flex; align-items: center; gap: 0.5rem; }
-      .confidence-bar { width: 6rem; height: 0.5rem; background: #e5e7eb; border-radius: 9999px; overflow: hidden; }
-      .confidence-fill { height: 100%; background: #22c55e; border-radius: 9999px; }
-      .scores-section { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #f3f4f6; }
-      .scores-title { font-size: 0.75rem; font-weight: 500; color: #6b7280; margin-bottom: 0.5rem; }
-      .scores-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; }
-      .score-item { display: flex; justify-content: space-between; padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 0.25rem; background: #f9fafb; }
-      .score-item.highlight { background: #f0fdf4; font-weight: 500; }
-      .score-item .name { color: #374151; }
-      .score-item .value { color: #6b7280; }
-      .error-box { padding: 1rem; background: #fef2f2; color: #b91c1c; border-radius: 0.5rem; }
-      /* Badge colors */
+      .example-btn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+      .example-btn.hard { background: #fef3c7; border-color: #fde68a; color: #78350f; }
+      .example-btn.hard:hover { background: #fde68a; }
+
+      /* Label badge palette — color identifies the LABEL, not the action */
+      .lb-user_unknown       { background: #fee2e2; color: #991b1b; }
+      .lb-invalid_address    { background: #ffe4e6; color: #9f1239; }
+      .lb-mailbox_disabled   { background: #fce7f3; color: #9d174d; }
+      .lb-mailbox_full       { background: #fef3c7; color: #92400e; }
+      .lb-greylisting        { background: #fef9c3; color: #854d0e; }
+      .lb-rate_limited       { background: #ffedd5; color: #9a3412; }
+      .lb-server_error       { background: #e5e7eb; color: #1f2937; }
+      .lb-ip_blacklisted     { background: #fecaca; color: #7f1d1d; }
+      .lb-domain_blacklisted { background: #e9d5ff; color: #6b21a8; }
+      .lb-auth_failure       { background: #e0e7ff; color: #3730a3; }
+      .lb-relay_denied       { background: #ede9fe; color: #5b21b6; }
+      .lb-spam_blocked       { background: #dbeafe; color: #1e40af; }
+      .lb-policy_blocked     { background: #e0f2fe; color: #075985; }
+      .lb-virus_detected     { background: #fbcfe8; color: #831843; }
+      .lb-geo_blocked        { background: #ccfbf1; color: #115e59; }
+      .lb-unknown            { background: #f3f4f6; color: #1f2937; }
+
+      /* Extra badge colors */
       .badge-red { background: #fee2e2; color: #991b1b; }
       .badge-yellow { background: #fef3c7; color: #92400e; }
       .badge-orange { background: #ffedd5; color: #9a3412; }
       .badge-purple { background: #f3e8ff; color: #6b21a8; }
       .badge-blue { background: #dbeafe; color: #1e40af; }
-      .badge-pink { background: #fce7f3; color: #9d174d; }
-      .badge-gray { background: #f3f4f6; color: #1f2937; }
       .badge-sky { background: #e0f2fe; color: #075985; }
       .badge-amber { background: #fef3c7; color: #92400e; }
       .badge-green { background: #dcfce7; color: #166534; }
-      .note-amber { color: #d97706; }
+      .badge-gray { background: #f3f4f6; color: #1f2937; }
     </style>
   </head>
   <body>
     <div class="container">
       <h1>SMTP Bounce Classifier</h1>
       <p class="subtitle">
-        Classify SMTP bounce messages using machine learning - runs entirely in
-        your browser.
-        <a href="https://github.com/postalsys/bounce-classifier" target="_blank" style="color: #2563eb;">GitHub</a>
+        Classify SMTP bounce messages using machine learning — runs entirely
+        in your browser.
+        <a href="https://github.com/postalsys/bounce-classifier" target="_blank" rel="noopener">GitHub</a>
+        ·
+        <a href="https://bounces.postalsys.com" target="_blank" rel="noopener">Contribute labels</a>
       </p>
+      <p id="model-strip" class="model-strip" aria-live="polite"></p>
 
-      <div id="status" class="status"></div>
+      <div id="status" class="status" role="alert"></div>
 
       <div class="form-group">
-        <label for="message">Enter SMTP bounce message:</label>
+        <label for="message">Enter an SMTP bounce message</label>
         <textarea
           id="message"
           placeholder="e.g., 550 5.1.1 The email account that you tried to reach does not exist."
         ></textarea>
+        <p class="hint" style="margin-top: 0.4rem;">
+          <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd> to classify.
+        </p>
       </div>
 
-      <button id="classify-btn" class="btn" disabled>Loading...</button>
+      <div class="controls">
+        <button id="classify-btn" class="btn" disabled>Loading model…</button>
+        <label class="checkbox">
+          <input type="checkbox" id="batch-mode" />
+          Batch mode (one bounce per line)
+        </label>
+      </div>
+      <div id="inline-error" class="inline-error" role="alert"></div>
 
-      <div id="result" class="result">
+      <div id="result" class="result" aria-live="polite">
         <h2>Classification Result</h2>
         <div id="result-content"></div>
       </div>
 
       <div class="examples">
-        <h3>Try these examples:</h3>
+        <h3>Try these examples</h3>
         <div class="examples-grid">
-          <button
-            class="example-btn"
-            data-message="550 5.1.1 The email account that you tried to reach does not exist."
-          >
-            User Unknown
-          </button>
-          <button
-            class="example-btn"
-            data-message="552 5.2.2 The email account that you tried to reach is over quota."
-          >
-            Mailbox Full
-          </button>
-          <button
-            class="example-btn"
-            data-message="421 4.7.0 Try again later, closing connection."
-          >
-            Greylisting
-          </button>
-          <button
-            class="example-btn"
-            data-message="550 5.7.1 Service unavailable, IP blocked by Spamhaus ZEN"
-          >
-            IP Blacklisted
-          </button>
-          <button
-            class="example-btn"
-            data-message="550 5.7.1 Unauthenticated email from example.com is not accepted due to domain's DMARC policy."
-          >
-            Auth Failure
-          </button>
-          <button
-            class="example-btn"
-            data-message="421 4.7.28 Our system has detected an unusual rate of unsolicited mail originating from your IP address. Try again in 30 minutes."
-          >
-            Rate Limited
-          </button>
-          <button
-            class="example-btn"
-            data-message="552 5.7.0 Our system detected an illegal attachment on your message."
-          >
-            Virus Detected
-          </button>
+          <button class="example-btn" data-message="550 5.1.1 The email account that you tried to reach does not exist.">User Unknown</button>
+          <button class="example-btn" data-message="552 5.2.2 The email account that you tried to reach is over quota.">Mailbox Full</button>
+          <button class="example-btn" data-message="421 4.7.0 Try again later, closing connection.">Greylisting</button>
+          <button class="example-btn" data-message="550 5.7.1 Service unavailable, IP blocked by Spamhaus ZEN">IP Blacklisted</button>
+          <button class="example-btn" data-message="550 5.7.1 Unauthenticated email from example.com is not accepted due to domain's DMARC policy.">Auth Failure</button>
+          <button class="example-btn" data-message="421 4.7.28 Our system has detected an unusual rate of unsolicited mail originating from your IP address. Try again in 30 minutes.">Rate Limited</button>
+          <button class="example-btn" data-message="552 5.7.0 Our system detected an illegal attachment on your message.">Virus Detected</button>
+          <button class="example-btn hard" data-message="450 4.1.1 Delivery deferred: The user you are trying to contact has exceeded their storage allowance and cannot receive further mail at this time.">Hard: Mailbox Full (unusual phrasing)</button>
+          <button class="example-btn hard" data-message="451 Temporary problem, please retry. No such user here.">Hard: User Unknown vs. 4xx code</button>
         </div>
       </div>
     </div>
@@ -146,25 +195,49 @@
     <script type="module">
       import {
         classify,
+        classifyBatch,
         initialize,
+        getModelInfo,
         extractSmtpCodes,
       } from "../src/index.js";
 
-      const ACTION_STYLES = {
-        remove: "badge-red",
-        retry: "badge-yellow",
-        retry_different_ip: "badge-orange",
-        fix_configuration: "badge-purple",
-        review: "badge-blue",
-        remove_content: "badge-pink",
+      // Display metadata — color by LABEL (identity), not by action.
+      const LABEL_ICONS = {
+        user_unknown: "👤",
+        invalid_address: "✉️",
+        mailbox_disabled: "🚫",
+        mailbox_full: "📦",
+        greylisting: "⏳",
+        rate_limited: "🐢",
+        server_error: "⚠️",
+        ip_blacklisted: "🛑",
+        domain_blacklisted: "🚧",
+        auth_failure: "🔐",
+        relay_denied: "🔒",
+        spam_blocked: "🗑️",
+        policy_blocked: "📋",
+        virus_detected: "🦠",
+        geo_blocked: "🌍",
+        unknown: "❓",
       };
 
-      // DOM elements
-      const statusEl = document.getElementById("status");
-      const messageEl = document.getElementById("message");
-      const classifyBtn = document.getElementById("classify-btn");
-      const resultEl = document.getElementById("result");
-      const resultContentEl = document.getElementById("result-content");
+      const ACTION_ICONS = {
+        remove: "🗑️",
+        retry: "🔁",
+        retry_different_ip: "🌐",
+        fix_configuration: "🔧",
+        review: "👀",
+        remove_content: "🧹",
+      };
+
+      const TRAINER_URL = "https://bounces.postalsys.com";
+
+      function toTitleCase(snake) {
+        return snake
+          .split("_")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+      }
 
       function formatRetryTime(seconds) {
         if (seconds < 60) return `${seconds} second${seconds !== 1 ? "s" : ""}`;
@@ -178,164 +251,485 @@
         return `${hours}h ${mins}m`;
       }
 
-      // Display result
-      function displayResult(result, message) {
-        const confidencePercent = (result.confidence * 100).toFixed(1);
-        const sortedScores = Object.entries(result.scores).sort(
-          (a, b) => b[1] - a[1],
+      function el(tag, props = {}, children = []) {
+        const node = document.createElement(tag);
+        for (const [k, v] of Object.entries(props)) {
+          if (k === "className") node.className = v;
+          else if (k === "text") node.textContent = v;
+          else if (k.startsWith("on") && typeof v === "function")
+            node.addEventListener(k.slice(2).toLowerCase(), v);
+          else if (k === "dataset") Object.assign(node.dataset, v);
+          else node.setAttribute(k, v);
+        }
+        for (const c of children) {
+          if (c == null) continue;
+          node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+        }
+        return node;
+      }
+
+      const DOM = {
+        statusEl: document.getElementById("status"),
+        messageEl: document.getElementById("message"),
+        classifyBtn: document.getElementById("classify-btn"),
+        resultEl: document.getElementById("result"),
+        resultContentEl: document.getElementById("result-content"),
+        inlineError: document.getElementById("inline-error"),
+        batchMode: document.getElementById("batch-mode"),
+        modelStrip: document.getElementById("model-strip"),
+      };
+
+      function showInlineError(message) {
+        DOM.inlineError.textContent = message;
+        DOM.inlineError.classList.add("visible");
+      }
+
+      function clearInlineError() {
+        DOM.inlineError.textContent = "";
+        DOM.inlineError.classList.remove("visible");
+      }
+
+      // Build a label badge: icon + title-cased label, colored by label identity.
+      function labelBadge(label, size = "normal") {
+        const icon = LABEL_ICONS[label] || "❓";
+        const badge = el("span", { className: `label-badge lb-${label}` }, [
+          el("span", { className: "icon", "aria-hidden": "true", text: icon }),
+          toTitleCase(label),
+        ]);
+        if (size === "small") {
+          badge.style.fontSize = "0.8rem";
+          badge.style.padding = "0.25rem 0.6rem";
+        }
+        return badge;
+      }
+
+      function confidencePill(confidence) {
+        const pct = (confidence * 100).toFixed(1);
+        const low = confidence < 0.5;
+        return el(
+          "span",
+          { className: `confidence-pill${low ? " low" : ""}` },
+          [
+            el("span", { className: "bar" }, [
+              el("span", { className: "fill", style: `width: ${pct}%` }),
+            ]),
+            `${pct}%`,
+          ],
         );
-        const actionStyle = ACTION_STYLES[result.action] || "badge-gray";
+      }
 
-        // Build badges
+      function actionCard(action) {
+        const icon = ACTION_ICONS[action] || "•";
+        return el("div", { className: "action-card" }, [
+          el("span", { className: "action-label", text: "Recommended action" }),
+          el("span", { className: "action-value" }, [
+            el("span", { "aria-hidden": "true", text: icon }),
+            toTitleCase(action),
+          ]),
+        ]);
+      }
+
+      function trainerCallout(reason) {
+        return el("div", { className: "trainer-callout" }, [
+          el("strong", { text: `${reason} ` }),
+          "Help improve the model: ",
+          el("a", { href: TRAINER_URL, target: "_blank", rel: "noopener" }, [
+            "submit this bounce with the correct label →",
+          ]),
+        ]);
+      }
+
+      function trainerLink() {
+        return el("p", { className: "trainer-cta" }, [
+          "Looks wrong? ",
+          el("a", { href: TRAINER_URL, target: "_blank", rel: "noopener" }, [
+            "Submit a correction →",
+          ]),
+        ]);
+      }
+
+      function badgesRow(message, result) {
         const badges = [];
-        const smtpCodes = extractSmtpCodes(message);
-
-        if (smtpCodes.mainCode || smtpCodes.extendedCode) {
-          const codes = [];
-          if (smtpCodes.mainCode) codes.push(smtpCodes.mainCode);
-          if (smtpCodes.extendedCode) codes.push(smtpCodes.extendedCode);
+        const smtp = extractSmtpCodes(message);
+        if (smtp.mainCode || smtp.extendedCode) {
+          const codes = [smtp.mainCode, smtp.extendedCode]
+            .filter(Boolean)
+            .join(" / ");
           badges.push(
-            `<span class="badge badge-sky">SMTP: ${codes.join(" / ")}</span>`,
+            el("span", { className: "badge badge-sky", text: `SMTP ${codes}` }),
           );
         }
-
         if (result.retryAfter) {
           badges.push(
-            `<span class="badge badge-amber">Retry after: ${formatRetryTime(result.retryAfter)}</span>`,
+            el("span", {
+              className: "badge badge-amber",
+              text: `Retry after ${formatRetryTime(result.retryAfter)}`,
+            }),
           );
         }
-
         if (result.blocklist) {
-          const blName = result.blocklist.lists
+          const name = result.blocklist.lists
             ? result.blocklist.lists.map((b) => b.name).join(", ")
             : `${result.blocklist.name} (${result.blocklist.type})`;
           badges.push(
-            `<span class="badge badge-red">Blocklist: ${blName}</span>`,
+            el("span", { className: "badge badge-red", text: `Blocklist: ${name}` }),
+          );
+        }
+        if (result.usedFallback) {
+          badges.push(
+            el("span", {
+              className: "badge badge-gray",
+              title: "Model confidence was low — SMTP code / text pattern fallback was used",
+              text: "Fallback used",
+            }),
+          );
+        }
+        if (badges.length === 0) return null;
+        const row = el("div", { className: "badges" });
+        badges.forEach((b) => row.appendChild(b));
+        return row;
+      }
+
+      // Shared "Copy JSON" affordance: returns { button, status } so callers
+      // can place them in whatever layout they want without duplicating the
+      // clipboard + feedback machinery.
+      function copyJsonButton(json, label = "Copy JSON") {
+        const status = el("span", {
+          className: "copy-ok",
+          "aria-live": "polite",
+        });
+        const button = el(
+          "button",
+          {
+            type: "button",
+            className: "btn-secondary",
+            onClick: async () => {
+              try {
+                await navigator.clipboard.writeText(json);
+                status.textContent = "Copied";
+                setTimeout(() => (status.textContent = ""), 1500);
+              } catch {
+                status.textContent = "Copy failed";
+              }
+            },
+          },
+          [label],
+        );
+        return { button, status };
+      }
+
+      function codePanel(message, result) {
+        const json = JSON.stringify(result, null, 2);
+        const snippet = `const result = await classify(${JSON.stringify(message)});`;
+        const { button, status } = copyJsonButton(json);
+
+        return el("div", { className: "code-panel" }, [
+          el("div", { className: "code-header" }, [
+            "Output",
+            el("span", { className: "copy-wrap" }, [button, status]),
+          ]),
+          el("div", { className: "code-body" }, [
+            el("pre", {}, [`${snippet}\n\n// result:\n${json}`]),
+          ]),
+        ]);
+      }
+
+      function detailsPanel(result) {
+        const sortedScores = Object.entries(result.scores).sort(
+          (a, b) => b[1] - a[1],
+        );
+        const panelId = "details-content";
+        const toggle = el(
+          "button",
+          {
+            type: "button",
+            className: "details-toggle",
+            "aria-expanded": "false",
+            "aria-controls": panelId,
+          },
+          [
+            el("span", { text: "All 16 scores" }),
+            (() => {
+              const svg = document.createElementNS(
+                "http://www.w3.org/2000/svg",
+                "svg",
+              );
+              svg.setAttribute("fill", "none");
+              svg.setAttribute("stroke", "currentColor");
+              svg.setAttribute("viewBox", "0 0 24 24");
+              const path = document.createElementNS(
+                "http://www.w3.org/2000/svg",
+                "path",
+              );
+              path.setAttribute("stroke-linecap", "round");
+              path.setAttribute("stroke-linejoin", "round");
+              path.setAttribute("stroke-width", "2");
+              path.setAttribute("d", "M19 9l-7 7-7-7");
+              svg.appendChild(path);
+              return svg;
+            })(),
+          ],
+        );
+        const content = el("div", {
+          id: panelId,
+          className: "details-content",
+        });
+        const grid = el("div", { className: "scores-grid" });
+        for (const [label, score] of sortedScores) {
+          const isPicked = label === result.label;
+          grid.appendChild(
+            el(
+              "div",
+              { className: `score-item${isPicked ? " highlight" : ""}` },
+              [
+                el("span", { className: "name", text: toTitleCase(label) }),
+                el("span", {
+                  className: "value",
+                  text: `${(score * 100).toFixed(1)}%`,
+                }),
+              ],
+            ),
+          );
+        }
+        content.appendChild(
+          el("div", { className: "scores-title", text: "Per-label scores" }),
+        );
+        content.appendChild(grid);
+
+        toggle.addEventListener("click", () => {
+          const expanded = toggle.getAttribute("aria-expanded") === "true";
+          toggle.setAttribute("aria-expanded", (!expanded).toString());
+          content.classList.toggle("visible");
+        });
+
+        return el("div", { className: "details-panel" }, [toggle, content]);
+      }
+
+      function renderSingleResult(result, message) {
+        const container = DOM.resultContentEl;
+        container.replaceChildren();
+
+        const uncertain = result.confidence < 0.5 || result.label === "unknown";
+        if (uncertain) {
+          container.appendChild(
+            trainerCallout(
+              result.label === "unknown"
+                ? "Couldn't confidently classify this bounce."
+                : `Low confidence (${(result.confidence * 100).toFixed(0)}%).`,
+            ),
           );
         }
 
-        resultContentEl.innerHTML = `
-                <div class="label-badge ${actionStyle}">
-                    ${result.label.replace(/_/g, " ")}
-                </div>
+        container.appendChild(
+          el("div", { className: "identity" }, [
+            labelBadge(result.label),
+            confidencePill(result.confidence),
+          ]),
+        );
+        container.appendChild(actionCard(result.action));
 
-                <div class="action-row">
-                    <span class="label">Recommended Action</span>
-                    <span class="value">${result.action.replace(/_/g, " ")}</span>
-                </div>
+        const badges = badgesRow(message, result);
+        if (badges) container.appendChild(badges);
 
-                ${badges.length > 0 ? `<div class="badges">${badges.join("")}</div>` : ""}
+        container.appendChild(codePanel(message, result));
+        container.appendChild(detailsPanel(result));
+        container.appendChild(trainerLink());
 
-                <div class="details-panel">
-                    <button onclick="toggleDetails()" class="details-toggle" id="details-toggle">
-                        <span>Details</span>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                    </button>
-                    <div id="details-content" class="details-content">
-                        <div class="confidence-row">
-                            <span class="label">Confidence</span>
-                            <div class="confidence-bar-wrapper">
-                                <div class="confidence-bar">
-                                    <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
-                                </div>
-                                <span class="value">${confidencePercent}%</span>
-                            </div>
-                        </div>
-
-                        ${
-                          result.usedFallback
-                            ? `
-                        <div class="confidence-row">
-                            <span class="label">Note</span>
-                            <span class="note-amber">Used SMTP code fallback</span>
-                        </div>
-                        `
-                            : ""
-                        }
-
-                        <div class="scores-section">
-                            <div class="scores-title">All Scores</div>
-                            <div class="scores-grid">
-                                ${sortedScores
-                                  .map(
-                                    ([label, score]) => `
-                                    <div class="score-item ${label === result.label ? "highlight" : ""}">
-                                        <span class="name">${label.replace(/_/g, " ")}</span>
-                                        <span class="value">${(score * 100).toFixed(1)}%</span>
-                                    </div>
-                                `,
-                                  )
-                                  .join("")}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-        resultEl.classList.add("visible");
+        DOM.resultEl.classList.add("visible");
       }
 
-      // Toggle details accordion
-      window.toggleDetails = function () {
-        const content = document.getElementById("details-content");
-        const toggle = document.getElementById("details-toggle");
-        content.classList.toggle("visible");
-        toggle.classList.toggle("open");
-      };
+      function renderBatchResults(results, messages) {
+        const container = DOM.resultContentEl;
+        container.replaceChildren();
 
-      // Event handlers
-      classifyBtn.addEventListener("click", async () => {
-        const message = messageEl.value.trim();
-        if (!message) {
-          alert("Please enter a bounce message");
+        const table = el("table", { className: "batch-table" });
+        const thead = el("thead", {}, [
+          el("tr", {}, [
+            el("th", { text: "Message" }),
+            el("th", { text: "Label" }),
+            el("th", { text: "Action" }),
+            el("th", { text: "Confidence" }),
+          ]),
+        ]);
+        const tbody = el("tbody");
+        results.forEach((r, i) => {
+          tbody.appendChild(
+            el("tr", {}, [
+              el("td", {
+                className: "msg",
+                title: messages[i],
+                text: messages[i],
+              }),
+              el("td", {}, [labelBadge(r.label, "small")]),
+              el("td", { text: toTitleCase(r.action) }),
+              el("td", {
+                className: "conf",
+                text: `${(r.confidence * 100).toFixed(1)}%`,
+              }),
+            ]),
+          );
+        });
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        container.appendChild(table);
+
+        const { button, status } = copyJsonButton(
+          JSON.stringify(results, null, 2),
+        );
+        container.appendChild(
+          el("div", { style: "margin-top: 0.75rem" }, [button, status]),
+        );
+        container.appendChild(trainerLink());
+
+        DOM.resultEl.classList.add("visible");
+      }
+
+      function renderError(error) {
+        const container = DOM.resultContentEl;
+        container.replaceChildren(
+          el("div", { className: "inline-error visible", role: "alert" }, [
+            `Error: ${error.message}`,
+          ]),
+        );
+        DOM.resultEl.classList.add("visible");
+      }
+
+      // Split batch input: blank line separates multi-line messages; otherwise
+      // each non-empty line is one message.
+      function parseBatchInput(raw) {
+        if (raw.includes("\n\n")) {
+          return raw
+            .split(/\n\s*\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+        return raw
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+
+      // URL hash state — share a classification by copying the URL.
+      function readHashMessage() {
+        const h = window.location.hash;
+        if (!h.startsWith("#q=")) return null;
+        try {
+          return decodeURIComponent(h.slice(3));
+        } catch {
+          return null;
+        }
+      }
+
+      function writeHashMessage(msg) {
+        const hash = `#q=${encodeURIComponent(msg)}`;
+        if (window.location.hash === hash) return;
+        const url = `${window.location.pathname}${window.location.search}${hash}`;
+        window.history.replaceState(null, "", url);
+      }
+
+      async function handleClassify() {
+        clearInlineError();
+        const raw = DOM.messageEl.value.trim();
+        if (!raw) {
+          showInlineError("Enter a bounce message first.");
           return;
         }
 
-        classifyBtn.disabled = true;
-        classifyBtn.textContent = "Classifying...";
+        DOM.classifyBtn.disabled = true;
+        const prevText = DOM.classifyBtn.textContent;
+        DOM.classifyBtn.textContent = "Classifying…";
 
         try {
-          const result = await classify(message);
-          displayResult(result, message);
+          if (DOM.batchMode.checked) {
+            const messages = parseBatchInput(raw);
+            if (messages.length === 0) {
+              showInlineError("No messages to classify.");
+              return;
+            }
+            const results = await classifyBatch(messages);
+            renderBatchResults(results, messages);
+          } else {
+            const result = await classify(raw);
+            writeHashMessage(raw);
+            renderSingleResult(result, raw);
+          }
         } catch (error) {
-          // textContent (not innerHTML) — error.message can include the
-          // user's input verbatim and must not be parsed as HTML.
-          const box = document.createElement("div");
-          box.className = "error-box";
-          box.textContent = `Error: ${error.message}`;
-          resultContentEl.replaceChildren(box);
-          resultEl.classList.add("visible");
+          renderError(error);
         } finally {
-          classifyBtn.disabled = false;
-          classifyBtn.textContent = "Classify";
+          DOM.classifyBtn.disabled = false;
+          DOM.classifyBtn.textContent = prevText === "Classifying…" ? "Classify" : prevText;
+        }
+      }
+
+      function renderModelStrip() {
+        const info = getModelInfo();
+        if (!info.initialized) {
+          DOM.modelStrip.textContent = "";
+          return;
+        }
+        const parts = [];
+        if (info.modelHash) parts.push(`model <code>${info.modelHash}</code>`);
+        if (info.trainedAt) {
+          const date = info.trainedAt.slice(0, 10);
+          parts.push(`trained ${date}`);
+        }
+        if (typeof info.trainingSamples === "number")
+          parts.push(`${info.trainingSamples.toLocaleString()} samples`);
+        if (typeof info.validationAccuracy === "number")
+          parts.push(`${(info.validationAccuracy * 100).toFixed(1)}% validation`);
+        // Use textContent for the container, then inject the only bit of
+        // markup we allow (the <code> tag around the hash).
+        if (parts.length === 0) {
+          DOM.modelStrip.textContent = "";
+          return;
+        }
+        DOM.modelStrip.innerHTML = parts.join(" · ");
+      }
+
+      // Wire up event handlers
+      DOM.classifyBtn.addEventListener("click", handleClassify);
+      DOM.messageEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          DOM.classifyBtn.click();
         }
       });
-
-      // Example buttons
       document.querySelectorAll(".example-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
-          messageEl.value = btn.dataset.message;
+          DOM.messageEl.value = btn.dataset.message;
+          DOM.messageEl.focus();
         });
       });
-
-      // Ctrl+Enter to submit
-      messageEl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && e.ctrlKey) {
-          classifyBtn.click();
-        }
+      DOM.batchMode.addEventListener("change", () => {
+        DOM.messageEl.placeholder = DOM.batchMode.checked
+          ? "One bounce per line. Blank line separates multi-line messages."
+          : "e.g., 550 5.1.1 The email account that you tried to reach does not exist.";
       });
 
-      // Initialize
+      // Pre-fill from URL hash if present (but don't auto-submit).
+      const hashMsg = readHashMessage();
+      if (hashMsg) DOM.messageEl.value = hashMsg;
+
+      // Initialize with progress reporting.
       try {
-        await initialize({ modelPath: "../model" });
-        classifyBtn.disabled = false;
-        classifyBtn.textContent = "Classify";
+        await initialize({
+          modelPath: "../model",
+          onProgress: ({ phase, loaded, total }) => {
+            if (phase === "weights" && total > 0) {
+              const pct = Math.min(100, Math.round((loaded / total) * 100));
+              DOM.classifyBtn.textContent = `Loading model… ${pct}%`;
+            } else {
+              DOM.classifyBtn.textContent = `Loading ${phase}…`;
+            }
+          },
+        });
+        DOM.classifyBtn.disabled = false;
+        DOM.classifyBtn.textContent = "Classify";
+        renderModelStrip();
       } catch (error) {
-        statusEl.textContent = `Error loading model: ${error.message}`;
-        statusEl.classList.add("visible");
-        classifyBtn.textContent = "Error";
+        DOM.statusEl.textContent = `Error loading model: ${error.message}`;
+        DOM.statusEl.classList.add("visible");
+        DOM.classifyBtn.textContent = "Error";
         console.error(error);
       }
     </script>
