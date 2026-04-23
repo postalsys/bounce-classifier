@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.0](https://github.com/postalsys/bounce-classifier/compare/v2.4.0...v3.0.0) (2026-04-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* getModelInfo() no longer returns null before init; it always returns an object. Use the new `initialized` flag instead of a null-check.
+
+### Features
+
+* classifyBatch, custom fallbacks, streaming init, demo UX overhaul ([1bae2c3](https://github.com/postalsys/bounce-classifier/commit/1bae2c37384124b4c3ab50b8a267354f26d32d9a))
+
+
+### Bug Fixes
+
+* prevent extractSmtpCodes from matching IPv4 octets ([665d332](https://github.com/postalsys/bounce-classifier/commit/665d332de73e4dc160ba788c237fc6bc6627a5c3))
+
 ## [2.4.0](https://github.com/postalsys/bounce-classifier/compare/v2.3.0...v2.4.0) (2026-03-16)
 
 

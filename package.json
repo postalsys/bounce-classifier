@@ -1,6 +1,6 @@
 {
   "name": "@postalsys/bounce-classifier",
-  "version": "2.4.0",
+  "version": "3.0.0",
   "description": "SMTP bounce message classifier using machine learning",
   "author": "Andris Reinman",
   "license": "MIT",
