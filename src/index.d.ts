@@ -51,6 +51,8 @@ export interface BlocklistInfo {
   name: string;
   /** Type of blocklist */
   type: BlocklistType;
+  /** True when a DNSBL or lookup hostname matched, false for a wording match */
+  host: boolean;
 }
 
 /**
@@ -59,6 +61,8 @@ export interface BlocklistInfo {
 export interface MultipleBlocklistInfo {
   /** Array of identified blocklists */
   lists: BlocklistInfo[];
+  /** True when any of the lists matched on a hostname */
+  host: boolean;
 }
 
 /**
@@ -71,6 +75,8 @@ export interface BlocklistPattern {
   name: string;
   /** Type of blocklist */
   type: BlocklistType;
+  /** Whether the pattern matches a DNSBL or lookup hostname */
+  host: boolean;
 }
 
 /**
@@ -89,7 +95,10 @@ export interface ClassificationResult {
   usedFallback?: boolean;
   /** Retry time in seconds (only present if timing found in message) */
   retryAfter?: number;
-  /** Identified blocklist (only present if blocklist found in message) */
+  /**
+   * Identified blocklist. Present when a DNSBL hostname is named, or when
+   * listing wording is found and the label is blocklist-related.
+   */
   blocklist?: BlocklistInfo | MultipleBlocklistInfo;
 }
 

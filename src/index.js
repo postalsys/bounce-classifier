@@ -70,57 +70,131 @@ export const ACTION_MAP = {
   unknown: "review",
 };
 
+// Mail security vendors are named in ordinary rejections too (Mimecast links
+// its "Invalid Recipient" help page, appliances sign "Protected by Barracuda
+// Networks"), so a vendor only counts as a blocklist when its DNSBL or lookup
+// hostname appears, or its name sits next to explicit listing wording.
+const BLOCKLIST_WORDING =
+  "\\b(?:block(?:ed|ing|list(?:ed)?)?|blacklist(?:ed)?|listed|rbl|dnsbl|reputation)\\b";
+
+function nearWording(term, wording = BLOCKLIST_WORDING) {
+  return new RegExp(
+    `\\b${term}\\b.{0,60}${wording}|${wording}.{0,60}\\b${term}\\b`,
+    "i",
+  );
+}
+
+// A vendor yields a hostname-level entry (its DNSBL or lookup host was named,
+// which is evidence on its own) and a wording-level entry (its name next to
+// listing wording, trusted only when the classifier agrees on a block).
+function vendorBlocklistEntries(vendor, name, hostnames) {
+  const entries = [
+    { pattern: nearWording(vendor), name, type: "ip", host: false },
+  ];
+  if (hostnames) {
+    entries.unshift({
+      pattern: new RegExp(hostnames, "i"),
+      name,
+      type: "ip",
+      host: true,
+    });
+  }
+  return entries;
+}
+
+// Classification labels a blocklist hit is reported for. Other labels (an
+// unknown recipient, a full mailbox) are not caused by a listing, whatever
+// the message happens to mention.
+const BLOCKLIST_LABELS = new Set([
+  "ip_blacklisted",
+  "domain_blacklisted",
+  "spam_blocked",
+  "policy_blocked",
+]);
+
 // Known blocklists and their patterns
 export const BLOCKLIST_PATTERNS = [
   // Spamhaus
-  { pattern: /spamhaus\.org/i, name: "Spamhaus", type: "ip" },
-  { pattern: /\bsbl\b/i, name: "Spamhaus SBL", type: "ip" },
-  { pattern: /\bxbl\b/i, name: "Spamhaus XBL", type: "ip" },
-  { pattern: /\bpbl\b/i, name: "Spamhaus PBL", type: "ip" },
-  { pattern: /\bdbl\.spamhaus/i, name: "Spamhaus DBL", type: "domain" },
-  { pattern: /\bzen\.spamhaus/i, name: "Spamhaus ZEN", type: "ip" },
+  { pattern: /spamhaus\.org/i, name: "Spamhaus", type: "ip", host: true },
+  { pattern: /\bsbl\b/i, name: "Spamhaus SBL", type: "ip", host: false },
+  { pattern: /\bxbl\b/i, name: "Spamhaus XBL", type: "ip", host: false },
+  { pattern: /\bpbl\b/i, name: "Spamhaus PBL", type: "ip", host: false },
+  {
+    pattern: /\bdbl\.spamhaus/i,
+    name: "Spamhaus DBL",
+    type: "domain",
+    host: true,
+  },
+  { pattern: /\bzen\.spamhaus/i, name: "Spamhaus ZEN", type: "ip", host: true },
 
   // Barracuda
-  { pattern: /barracuda/i, name: "Barracuda", type: "ip" },
-  { pattern: /b\.barracudacentral/i, name: "Barracuda", type: "ip" },
+  ...vendorBlocklistEntries("barracuda", "Barracuda", "barracudacentral\\.org"),
 
   // SORBS
-  { pattern: /sorbs\.net/i, name: "SORBS", type: "ip" },
-  { pattern: /dnsbl\.sorbs/i, name: "SORBS", type: "ip" },
+  { pattern: /sorbs\.net/i, name: "SORBS", type: "ip", host: true },
+  { pattern: /dnsbl\.sorbs/i, name: "SORBS", type: "ip", host: true },
 
   // SpamCop
-  { pattern: /spamcop\.net/i, name: "SpamCop", type: "ip" },
+  { pattern: /spamcop\.net/i, name: "SpamCop", type: "ip", host: true },
 
   // URIBL
-  { pattern: /uribl\.com/i, name: "URIBL", type: "uri" },
-  { pattern: /multi\.uribl/i, name: "URIBL", type: "uri" },
+  { pattern: /uribl\.com/i, name: "URIBL", type: "uri", host: true },
+  { pattern: /multi\.uribl/i, name: "URIBL", type: "uri", host: true },
 
   // Cloudmark
-  { pattern: /cloudmark/i, name: "Cloudmark", type: "ip" },
+  ...vendorBlocklistEntries("cloudmark", "Cloudmark", "csi\\.cloudmark\\.com"),
 
   // Proofpoint
-  { pattern: /proofpoint/i, name: "Proofpoint", type: "ip" },
+  ...vendorBlocklistEntries(
+    "proofpoint",
+    "Proofpoint",
+    "(?:ipcheck|prs)\\.proofpoint\\.com",
+  ),
 
   // Mimecast
-  { pattern: /mimecast/i, name: "Mimecast", type: "ip" },
+  ...vendorBlocklistEntries("mimecast", "Mimecast"),
 
   // Microsoft
-  { pattern: /\bS3150\b/i, name: "Microsoft Blocklist", type: "ip" },
+  {
+    pattern: /\bS3150\b/i,
+    name: "Microsoft Blocklist",
+    type: "ip",
+    host: false,
+  },
 
   // Invaluement
-  { pattern: /invaluement/i, name: "Invaluement", type: "ip" },
+  { pattern: /invaluement/i, name: "Invaluement", type: "ip", host: false },
 
   // Hostkarma
-  { pattern: /hostkarma/i, name: "Hostkarma", type: "ip" },
+  { pattern: /hostkarma/i, name: "Hostkarma", type: "ip", host: false },
 
   // Trend Micro
-  { pattern: /trend\s*micro/i, name: "Trend Micro", type: "ip" },
+  ...vendorBlocklistEntries(
+    "trend\\s*micro",
+    "Trend Micro",
+    "ers\\.trendmicro\\.com",
+  ),
 
-  // Generic RBL detection
-  { pattern: /\brbl\b/i, name: "RBL", type: "ip" },
-  { pattern: /\bdnsbl\b/i, name: "DNSBL", type: "ip" },
-  { pattern: /blacklist/i, name: "Blocklist", type: "ip" },
-  { pattern: /blocklist/i, name: "Blocklist", type: "ip" },
+  // Generic RBL detection. A bare "RBL" also turns up in unrelated text, so
+  // it needs listing wording nearby or a DNSBL hostname carrying the term.
+  {
+    pattern: /\b(?:dns|spam)?rbl\.[a-z0-9-]*[a-z]/i,
+    name: "RBL",
+    type: "ip",
+    host: true,
+  },
+  {
+    pattern: nearWording(
+      "rbl",
+      "\\b(?:block(?:ed|ing|list(?:ed)?)?|blacklist(?:ed)?|listed)\\b",
+    ),
+    name: "RBL",
+    type: "ip",
+    host: false,
+  },
+  { pattern: /\bdnsbl\b/i, name: "DNSBL", type: "ip", host: false },
+  { pattern: /blacklist/i, name: "Blocklist", type: "ip", host: false },
+  { pattern: /blocklist/i, name: "Blocklist", type: "ip", host: false },
 ];
 
 // SMTP Enhanced Status Code mapping (RFC 3463)
@@ -381,19 +455,22 @@ export function extractRetryTiming(message) {
  */
 export function identifyBlocklist(message) {
   const found = [];
-  for (const { pattern, name, type } of BLOCKLIST_PATTERNS) {
+  for (const { pattern, name, type, host } of BLOCKLIST_PATTERNS) {
     if (pattern.test(message)) {
-      if (!found.find((b) => b.name === name)) {
-        found.push({ name, type });
+      const existing = found.find((b) => b.name === name);
+      if (existing) {
+        existing.host = existing.host || host;
+      } else {
+        found.push({ name, type, host });
       }
     }
   }
   if (found.length === 0) return null;
   const specific = found.filter((b) => !GENERIC_BLOCKLIST_NAMES.has(b.name));
-  if (specific.length > 0) {
-    return specific.length === 1 ? specific[0] : { lists: specific };
+  if (specific.length > 1) {
+    return { lists: specific, host: specific.some((b) => b.host) };
   }
-  return found[0];
+  return specific.length === 1 ? specific[0] : found[0];
 }
 
 /**
@@ -863,8 +940,12 @@ export async function classify(message) {
     const retryAfter = extractRetryTiming(message);
     if (retryAfter !== null) result.retryAfter = retryAfter;
 
+    // A named DNSBL host is reported whatever the label; wording alone only
+    // when the label says the bounce was a block.
     const blocklist = identifyBlocklist(message);
-    if (blocklist !== null) result.blocklist = blocklist;
+    if (blocklist !== null && (blocklist.host || BLOCKLIST_LABELS.has(label))) {
+      result.blocklist = blocklist;
+    }
 
     return result;
   } finally {

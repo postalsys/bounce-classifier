@@ -137,7 +137,7 @@ const result2 = await classify("550 blocked using zen.spamhaus.org");
 //   label: 'ip_blacklisted',
 //   confidence: 0.958,
 //   action: 'retry_different_ip',
-//   blocklist: { name: 'Spamhaus ZEN', type: 'ip' },
+//   blocklist: { name: 'Spamhaus ZEN', type: 'ip', host: true },
 //   scores: { ... }
 // }
 ```
@@ -230,7 +230,7 @@ const seconds = extractRetryTiming("try again in 5 minutes");
 
 // Identify blocklists mentioned
 const blocklist = identifyBlocklist("blocked by zen.spamhaus.org");
-// { name: 'Spamhaus ZEN', type: 'ip' }
+// { name: 'Spamhaus ZEN', type: 'ip', host: true }
 
 // Get recommended action for a label
 const action = getAction("mailbox_full");

@@ -223,8 +223,60 @@ describe("Helper Functions", () => {
     });
 
     it("should identify Proofpoint", () => {
-      const result = identifyBlocklist("Rejected by Proofpoint");
+      const result = identifyBlocklist(
+        "521 5.7.1 Service unavailable; client [192.0.2.1] blocked using prs.proofpoint.com",
+      );
       assert.strictEqual(result.name, "Proofpoint");
+    });
+
+    it("should not treat a vendor name alone as a blocklist", () => {
+      for (const msg of [
+        "550 Invalid Recipient - https://community.mimecast.com/docs/DOC-1369#550",
+        "550 5.1.1 User unknown. Protected by Barracuda Networks",
+        "Rejected by Proofpoint",
+        "554 Message rejected due to content restrictions - Cloudmark",
+        "550 Mailbox unavailable (Trend Micro)",
+        "RBL check failed",
+      ]) {
+        assert.strictEqual(identifyBlocklist(msg), null, msg);
+      }
+    });
+
+    it("should identify vendor lookup hostnames", () => {
+      assert.strictEqual(
+        identifyBlocklist(
+          "554 Client host [192.0.2.1] blocked using b.barracudacentral.org",
+        ).name,
+        "Barracuda",
+      );
+      assert.strictEqual(
+        identifyBlocklist(
+          "550 5.7.1 Poor Reputation Sender. - https://csi.cloudmark.com/reset-request/?ip=192.0.2.1",
+        ).name,
+        "Cloudmark",
+      );
+    });
+
+    it("should report whether a DNSBL hostname matched", () => {
+      assert.strictEqual(
+        identifyBlocklist("blocked using b.barracudacentral.org").host,
+        true,
+      );
+      assert.strictEqual(identifyBlocklist("Blocked by Mimecast").host, false);
+      assert.deepStrictEqual(
+        identifyBlocklist("rejected, listed on rbl.example.org"),
+        { name: "RBL", type: "ip", host: true },
+      );
+      assert.deepStrictEqual(identifyBlocklist("Your IP is listed in an RBL"), {
+        name: "RBL",
+        type: "ip",
+        host: false,
+      });
+      // "rbl" inside an unrelated domain label is not a DNSBL hostname
+      assert.strictEqual(
+        identifyBlocklist("550 marblehead.com rejected"),
+        null,
+      );
     });
 
     it("should identify Mimecast", () => {
@@ -863,6 +915,40 @@ describe("Classifier", () => {
     it("should extract retry timing when present", async () => {
       const result = await classify("450 Greylisted, try again in 300 seconds");
       assert.strictEqual(result.retryAfter, 300);
+    });
+
+    it("should report a blocklist only for blocklist-related labels", async () => {
+      // wording-level matches: the generic "blocklist" pattern, or a vendor
+      // name, where the recipient is the problem
+      for (const msg of [
+        "550 5.1.1 User unknown, see our blocklist policy",
+        "550 Invalid Recipient - https://community.mimecast.com/docs/DOC-1369#550",
+        "550 5.1.1 User unknown. Protected by Barracuda Networks",
+      ]) {
+        const result = await classify(msg);
+        assert.strictEqual(result.label, "user_unknown", msg);
+        assert.strictEqual(result.blocklist, undefined, msg);
+      }
+
+      const listed = await classify(
+        "554 5.7.1 Service unavailable; Client host [192.0.2.1] blocked using b.barracudacentral.org",
+      );
+      assert.strictEqual(listed.label, "ip_blacklisted");
+      assert.deepStrictEqual(listed.blocklist, {
+        name: "Barracuda",
+        type: "ip",
+        host: true,
+      });
+    });
+
+    it("should report a hostname-level blocklist whatever the label", async () => {
+      const result = await classify("b.barracudacentral.org");
+      assert.strictEqual(result.label, "unknown");
+      assert.deepStrictEqual(result.blocklist, {
+        name: "Barracuda",
+        type: "ip",
+        host: true,
+      });
     });
 
     it("should identify blocklist when present", async () => {
