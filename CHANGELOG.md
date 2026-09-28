@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/postalsys/bounce-classifier/compare/v3.0.0...v3.0.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* report a blocklist only for listing-related labels or a DNSBL hostname match ([031789a](https://github.com/postalsys/bounce-classifier/commit/031789a7e3e3ead2a4060a1268384be31d919fab))
+
 ## [3.0.0](https://github.com/postalsys/bounce-classifier/compare/v2.4.0...v3.0.0) (2026-04-23)
 
 
