@@ -1139,8 +1139,14 @@ describe("Score validation", () => {
     assert.ok(sum > 0.99 && sum < 1.01, `Scores sum to ${sum}, expected ~1`);
   });
 
-  it("should have confidence matching the highest score", async () => {
+  it("should report the score of the returned label as confidence", async () => {
     const result = await classify("550 User unknown");
+    assert.strictEqual(result.confidence, result.scores[result.label]);
+  });
+
+  it("should report the top score as confidence when the model label stands", async () => {
+    const result = await classify("452 4.2.2 The email account is over quota");
+    assert.strictEqual(result.modelLabel, undefined);
     const maxScore = Math.max(...Object.values(result.scores));
     assert.strictEqual(result.confidence, maxScore);
   });
@@ -1344,6 +1350,44 @@ describe("registerTextFallback / clearTextFallbacks", () => {
     const result = await classify(msg);
     assert.strictEqual(result.label, "spam_blocked");
     assert.strictEqual(result.usedFallback, true);
+  });
+
+  it("should report the model score of an overriding fallback label", async () => {
+    const msg =
+      "550 5.1.1 The email account that you tried to reach does not exist";
+    const baseline = await classify(msg);
+    const override = Object.keys(baseline.scores).find(
+      (l) => l !== baseline.label,
+    );
+    registerTextFallback({ pattern: /tried to reach/, label: override });
+    const result = await classify(msg);
+    assert.strictEqual(result.label, override);
+    assert.strictEqual(result.modelLabel, baseline.label);
+    assert.strictEqual(result.confidence, result.scores[override]);
+    assert.ok(result.confidence < baseline.confidence);
+  });
+
+  it("should omit modelLabel when the fallback agrees with the model", async () => {
+    const msg =
+      "550 5.1.1 The email account that you tried to reach does not exist";
+    const baseline = await classify(msg);
+    registerTextFallback({ pattern: /tried to reach/, label: baseline.label });
+    const result = await classify(msg);
+    assert.strictEqual(result.usedFallback, true);
+    assert.strictEqual(result.modelLabel, undefined);
+    assert.strictEqual(result.confidence, baseline.confidence);
+  });
+
+  it("should report 0 confidence for a label the model does not know", async () => {
+    for (const label of ["custom_provider_block", "constructor", "__proto__"]) {
+      clearTextFallbacks();
+      registerTextFallback({ pattern: /XYZZY/, label });
+      const result = await classify("XYZZY rejected");
+      assert.strictEqual(result.label, label);
+      assert.strictEqual(result.confidence, 0);
+      assert.ok(result.modelLabel);
+      assert.strictEqual(result.action, "review");
+    }
   });
 
   it("should scan user patterns before built-ins", () => {

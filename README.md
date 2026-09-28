@@ -276,6 +276,8 @@ const result = await classify("550 5.2.2 Over quota");
 // result.usedFallback will be true
 ```
 
+Text-pattern fallbacks (and patterns added with `registerTextFallback()`) apply whatever the model's score. In every case `confidence` is the model's probability for the returned `label`, not for the label the model would have picked. When a fallback replaced the model's pick, `result.modelLabel` holds that original pick, and `confidence` is typically low because the model disagreed with the rule. A label the model does not know, such as one from a custom fallback, reports `confidence: 0`.
+
 ## Running the Demo
 
 The `example/` folder contains a browser demo. To run it:

@@ -85,8 +85,17 @@ export interface BlocklistPattern {
 export interface ClassificationResult {
   /** The predicted label */
   label: BounceLabel;
-  /** Confidence score (0-1) */
+  /**
+   * The model's probability (0-1) for the returned `label`. When a fallback
+   * rule replaced the model's pick, this is the model's score for the
+   * rule-chosen label, 0 if the model does not know that label.
+   */
   confidence: number;
+  /**
+   * The model's own top label. Present only when a fallback rule returned a
+   * different `label`.
+   */
+  modelLabel?: BounceLabel;
   /** Recommended action based on the label */
   action: BounceAction;
   /** Scores for all labels */

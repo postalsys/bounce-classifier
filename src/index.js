@@ -477,7 +477,7 @@ export function identifyBlocklist(message) {
  * Get recommended action based on category
  */
 export function getAction(category) {
-  return ACTION_MAP[category] || "review";
+  return Object.hasOwn(ACTION_MAP, category) ? ACTION_MAP[category] : "review";
 }
 
 /**
@@ -909,7 +909,8 @@ export async function classify(message) {
       }
     }
 
-    let label = labels.id_to_label[maxIndex];
+    const modelLabel = labels.id_to_label[maxIndex];
+    let label = modelLabel;
     let usedFallback = false;
 
     // Text patterns take priority (most reliable for specific phrases).
@@ -928,14 +929,19 @@ export async function classify(message) {
       }
     }
 
+    // `confidence` is the model's probability for the label actually
+    // returned, so a rule-picked label never inherits the score of the
+    // label it replaced. Labels the model does not know (user-registered
+    // fallbacks) get 0.
     const result = {
       label,
-      confidence: maxScore,
+      confidence: Object.hasOwn(allScores, label) ? allScores[label] : 0,
       action: getAction(label),
       scores: allScores,
     };
 
     if (usedFallback) result.usedFallback = true;
+    if (label !== modelLabel) result.modelLabel = modelLabel;
 
     const retryAfter = extractRetryTiming(message);
     if (retryAfter !== null) result.retryAfter = retryAfter;

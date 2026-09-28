@@ -13,10 +13,10 @@ For the low-level neural-network math (weight layout, matrix multiplications, so
 **Output.** A result object with:
 
 - `label` — one of 16 mutually-exclusive bounce categories (`user_unknown`, `mailbox_full`, `greylisting`, …).
-- `confidence` — softmax probability of the top label, in `[0, 1]`.
+- `confidence`: the model's softmax probability for the returned `label`, in `[0, 1]`. Equals the top score unless a fallback rule replaced the model's pick.
 - `action` — the _recommended operational step_, one of six: `remove`, `retry`, `retry_different_ip`, `fix_configuration`, `review`, `remove_content`.
 - `scores` — softmax probabilities over all 16 labels.
-- Optional enrichment: `retryAfter` (seconds), `blocklist` (identified RBL/URIBL), `usedFallback` (set when post-model rules changed the label).
+- Optional enrichment: `retryAfter` (seconds), `blocklist` (identified RBL/URIBL), `usedFallback` (set when a post-model rule matched), `modelLabel` (the model's own pick, set only when a rule returned a different label).
 
 **Design goals.** Sub-millisecond classification in JS, no native deps, deterministic per model version, works offline in Node and browser, and produces an _action_ — not just a label — so the caller never has to write the "what do I do with a `user_unknown` result" logic itself.
 
@@ -240,7 +240,7 @@ This mapping is the library's opinionated product surface. The label vocabulary 
 
 ## 9. Confidence: when to trust the result
 
-`result.confidence` is the softmax probability of the top label. Practical heuristics:
+`result.confidence` is the model's softmax probability for the returned label. When no rule changed the label, that is the top score. When a rule did, `result.modelLabel` holds the model's pick and `confidence` shows how much the model agreed with the rule, so a low value there means "rule and model disagree", not "rule is unreliable". Practical heuristics:
 
 - **> 0.85**: very likely correct for in-distribution bounces. Auto-action safely.
 - **0.5 – 0.85**: probably correct but worth logging. Useful to pair with the fallback chain — if `usedFallback` is also true, rules and model agreed on a final label through different paths, which is a strong signal.
