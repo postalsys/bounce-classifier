@@ -14,11 +14,11 @@ For the low-level neural-network math (weight layout, matrix multiplications, so
 
 - `label` — one of 16 mutually-exclusive bounce categories (`user_unknown`, `mailbox_full`, `greylisting`, …).
 - `confidence` — softmax probability of the top label, in `[0, 1]`.
-- `action` — the *recommended operational step*, one of six: `remove`, `retry`, `retry_different_ip`, `fix_configuration`, `review`, `remove_content`.
+- `action` — the _recommended operational step_, one of six: `remove`, `retry`, `retry_different_ip`, `fix_configuration`, `review`, `remove_content`.
 - `scores` — softmax probabilities over all 16 labels.
 - Optional enrichment: `retryAfter` (seconds), `blocklist` (identified RBL/URIBL), `usedFallback` (set when post-model rules changed the label).
 
-**Design goals.** Sub-millisecond classification in JS, no native deps, deterministic per model version, works offline in Node and browser, and produces an *action* — not just a label — so the caller never has to write the "what do I do with a `user_unknown` result" logic itself.
+**Design goals.** Sub-millisecond classification in JS, no native deps, deterministic per model version, works offline in Node and browser, and produces an _action_ — not just a label — so the caller never has to write the "what do I do with a `user_unknown` result" logic itself.
 
 **Non-goals.** Parsing MIME/DSN structure, looking up DNS, reading PTR records, reasoning about sender reputation. These belong above (or beside) the classifier, not inside it.
 
@@ -84,7 +84,7 @@ Defined in [`sanitizeMessage`](src/index.js):
 - Rejects `null`, `undefined`, non-strings, and whitespace-only input with a descriptive `Error`.
 - Truncates messages longer than `MAX_MESSAGE_LENGTH` (10,000 chars) rather than erroring. The model only looks at the first 100 tokens anyway; the larger cap exists so regex-based fallbacks don't pathologically scan 1 MB of text.
 
-Sanitization runs *before* the in-flight counter increments, so a malformed call can't block a pending `reload()`.
+Sanitization runs _before_ the in-flight counter increments, so a malformed call can't block a pending `reload()`.
 
 ---
 
@@ -95,9 +95,9 @@ Three-step normalization, then vocabulary mapping to a fixed-size `Int32Array(10
 ```javascript
 function preprocessText(text) {
   return text
-    .toLowerCase()              // case-fold
-    .replace(/[^\w\s]/g, " ")   // punctuation → space
-    .replace(/\s+/g, " ")       // collapse whitespace
+    .toLowerCase() // case-fold
+    .replace(/[^\w\s]/g, " ") // punctuation → space
+    .replace(/\s+/g, " ") // collapse whitespace
     .trim();
 }
 ```
@@ -141,16 +141,16 @@ The softmax output is interpreted two ways:
 
 ## 6. The fallback chain
 
-Raw argmax over softmax is *not* the classifier's final answer. A deterministic rule cascade runs after the model; it can override the ML prediction when a more reliable signal is available.
+Raw argmax over softmax is _not_ the classifier's final answer. A deterministic rule cascade runs after the model; it can override the ML prediction when a more reliable signal is available.
 
 ### 6.1 Why fallbacks exist
 
 Two categories of input are genuinely better handled by rules than by a 325k-parameter embedding net:
 
 - **Hyper-specific provider phrases.** `"illegal attachment"` (Gmail for infected mail), `"no such user"` (dozens of MTAs for user_unknown). These are short, exact, and the ML model's bag-of-embeddings representation can struggle when the diagnostic text is a single line with a rare word.
-- **RFC 3463 enhanced status codes.** `5.1.1` means `user_unknown`. Full stop. When the SMTP code is explicit, no amount of ML can be *more* right than mapping the code directly.
+- **RFC 3463 enhanced status codes.** `5.1.1` means `user_unknown`. Full stop. When the SMTP code is explicit, no amount of ML can be _more_ right than mapping the code directly.
 
-The fallback chain makes the classifier robust on inputs the model was trained on *and* on the long tail of rare-phrasing bounces that fall outside the training distribution.
+The fallback chain makes the classifier robust on inputs the model was trained on _and_ on the long tail of rare-phrasing bounces that fall outside the training distribution.
 
 ### 6.2 Order of evaluation
 
@@ -170,14 +170,14 @@ The fallback chain makes the classifier robust on inputs the model was trained o
 
 Two important nuances:
 
-- **Text patterns always take priority over the model**, even when the model is confident. If a bounce contains `"illegal attachment"`, it gets `virus_detected`. This is deliberate: text patterns are *curated*, they encode a human-specified certainty that doesn't get "outvoted" by a noisy embedding.
-- **SMTP-code fallback triggers only when the model is uncertain** — specifically when `maxScore < 0.5` (the `CODE_FALLBACK_THRESHOLD`) *or* the model picked `unknown`. A confident model prediction beats the RFC code, because the code is often generic (`5.7.1 Message rejected for policy reasons` says nothing about which policy).
+- **Text patterns always take priority over the model**, even when the model is confident. If a bounce contains `"illegal attachment"`, it gets `virus_detected`. This is deliberate: text patterns are _curated_, they encode a human-specified certainty that doesn't get "outvoted" by a noisy embedding.
+- **SMTP-code fallback triggers only when the model is uncertain** — specifically when `maxScore < 0.5` (the `CODE_FALLBACK_THRESHOLD`) _or_ the model picked `unknown`. A confident model prediction beats the RFC code, because the code is often generic (`5.7.1 Message rejected for policy reasons` says nothing about which policy).
 
 ### 6.3 Text patterns
 
 Defined in `TEXT_PATTERN_FALLBACKS` ([`src/index.js`](src/index.js)). A list of `{pattern: RegExp, label: string}` pairs, scanned in order; first match wins. Built-ins cover the most common user_unknown / auth_failure / virus_detected / mailbox_full / rate_limited phrasings, with `.{0,N}?` bounded quantifiers to prevent catastrophic backtracking on adversarial input.
 
-Users can prepend their own via [`registerTextFallback({pattern, label})`](README.md#registertextfallback-pattern-label---cleartextfallbacks). User patterns are scanned *before* built-ins, so a project-specific bounce from an in-house MTA can be classified without retraining. See §10.
+Users can prepend their own via [`registerTextFallback({pattern, label})`](README.md#registertextfallback-pattern-label---cleartextfallbacks). User patterns are scanned _before_ built-ins, so a project-specific bounce from an in-house MTA can be classified without retraining. See §10.
 
 ### 6.4 SMTP code extraction
 
@@ -213,9 +213,9 @@ Output shape is either:
 - `{name, type}` when a single specific blocklist matches (`{name: "Spamhaus ZEN", type: "ip"}`).
 - `{lists: [{name, type}, …]}` when multiple specific blocklists match.
 
-Generic names (`RBL`, `DNSBL`, `Blocklist`) are deprioritized: if a specific provider matches *and* the message also contains the word "RBL", only the specific one is returned. Otherwise the generic name is returned as a fallback. This prevents low-signal matches from crowding out high-signal ones.
+Generic names (`RBL`, `DNSBL`, `Blocklist`) are deprioritized: if a specific provider matches _and_ the message also contains the word "RBL", only the specific one is returned. Otherwise the generic name is returned as a fallback. This prevents low-signal matches from crowding out high-signal ones.
 
-`type` is one of `"ip"`, `"domain"`, `"uri"` — important because `ip_blacklisted` and `domain_blacklisted` map to *different* recommended actions (retry from a different IP vs. fix your sender config).
+`type` is one of `"ip"`, `"domain"`, `"uri"` — important because `ip_blacklisted` and `domain_blacklisted` map to _different_ recommended actions (retry from a different IP vs. fix your sender config).
 
 ---
 
@@ -223,14 +223,14 @@ Generic names (`RBL`, `DNSBL`, `Blocklist`) are deprioritized: if a specific pro
 
 The classifier's final product is `result.action`, a string enum that answers "what should the operator do now?" The mapping ([`ACTION_MAP`](src/index.js)) collapses 16 labels into 6 actions:
 
-| Action                  | Labels                                                     | Meaning                                              |
-| ----------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
-| `remove`                | `user_unknown`, `invalid_address`, `mailbox_disabled`      | Permanent address failure — remove from list.        |
-| `retry`                 | `greylisting`, `rate_limited`, `server_error`, `mailbox_full` | Temporary — resend after backoff (use `retryAfter` if present). |
-| `retry_different_ip`    | `ip_blacklisted`, `geo_blocked`                            | Sender IP is the problem — route via a different IP. |
-| `fix_configuration`     | `domain_blacklisted`, `auth_failure`, `relay_denied`       | Sender identity/config is the problem — human fix required. |
-| `review`                | `spam_blocked`, `policy_blocked`, `unknown`                | Needs human judgment — either content, local policy, or the classifier couldn't decide. |
-| `remove_content`        | `virus_detected`                                           | Message itself is problematic — don't retry this message; remove the attachment. |
+| Action               | Labels                                                        | Meaning                                                                                 |
+| -------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `remove`             | `user_unknown`, `invalid_address`, `mailbox_disabled`         | Permanent address failure — remove from list.                                           |
+| `retry`              | `greylisting`, `rate_limited`, `server_error`, `mailbox_full` | Temporary — resend after backoff (use `retryAfter` if present).                         |
+| `retry_different_ip` | `ip_blacklisted`, `geo_blocked`                               | Sender IP is the problem — route via a different IP.                                    |
+| `fix_configuration`  | `domain_blacklisted`, `auth_failure`, `relay_denied`          | Sender identity/config is the problem — human fix required.                             |
+| `review`             | `spam_blocked`, `policy_blocked`, `unknown`                   | Needs human judgment — either content, local policy, or the classifier couldn't decide. |
+| `remove_content`     | `virus_detected`                                              | Message itself is problematic — don't retry this message; remove the attachment.        |
 
 This mapping is the library's opinionated product surface. The label vocabulary is what the model learned; the action vocabulary is what an operator cares about. Keeping them separate means the model can be retrained with finer label grain in the future without churning every caller's switch statement.
 
@@ -248,7 +248,7 @@ This mapping is the library's opinionated product surface. The label vocabulary 
 
 `result.scores` exposes the full distribution for callers who want more nuanced logic (e.g. "route to human if top-2 margin < 0.2", or "ensemble with a second model"). The scores always sum to ~1 (softmax) and each is in `[0, 1]`.
 
-**Important**: published ~95% validation accuracy is *in-distribution* on a held-out slice of the trainer corpus. Real-world accuracy on your specific sender mix depends on how well your providers are represented in the training data. Non-English bounces are under-represented and classify less reliably; contributing samples to the trainer service (§11) is the fix.
+**Important**: published ~95% validation accuracy is _in-distribution_ on a held-out slice of the trainer corpus. Real-world accuracy on your specific sender mix depends on how well your providers are represented in the training data. Non-English bounces are under-represented and classify less reliably; contributing samples to the trainer service (§11) is the fix.
 
 ---
 
@@ -259,7 +259,10 @@ The classifier is intentionally opinionated but exposes three surfaces for custo
 ### 10.1 Custom text fallbacks
 
 ```javascript
-import { registerTextFallback, clearTextFallbacks } from "@postalsys/bounce-classifier";
+import {
+  registerTextFallback,
+  clearTextFallbacks,
+} from "@postalsys/bounce-classifier";
 
 registerTextFallback({
   pattern: /XYZZY-PROVIDER-\d+/,
@@ -267,7 +270,7 @@ registerTextFallback({
 });
 ```
 
-User patterns are scanned before built-ins and before SMTP codes, so they effectively override *everything*. They survive `reset()` and `reload()` (they're config, not model state); `clearTextFallbacks()` removes them. Validation is strict: `pattern` must be a `RegExp`, `label` must be a non-empty string.
+User patterns are scanned before built-ins and before SMTP codes, so they effectively override _everything_. They survive `reset()` and `reload()` (they're config, not model state); `clearTextFallbacks()` removes them. Validation is strict: `pattern` must be a `RegExp`, `label` must be a non-empty string.
 
 Use this for project-specific bounce phrasings from in-house MTAs or niche providers the public trainer hasn't seen.
 
@@ -289,7 +292,7 @@ These aren't stable-versioned as strongly as `classify()`, but they're there so 
 
 ## 11. Model lifecycle
 
-The neural network is *not* trained in this repo. Training happens in a separate service at [bounces.postalsys.com](https://bounces.postalsys.com) ("the Bounce Trainer"), which:
+The neural network is _not_ trained in this repo. Training happens in a separate service at [bounces.postalsys.com](https://bounces.postalsys.com) ("the Bounce Trainer"), which:
 
 1. Accepts user-submitted labeled bounces from the community.
 2. Periodically retrains the Keras model on the accumulated corpus.
@@ -334,4 +337,4 @@ Each model ships with a `config.json` carrying:
 - [`README.md`](README.md) — API reference, usage examples, labels table.
 - [`bounces.postalsys.com`](https://bounces.postalsys.com) — Bounce Trainer service; submit labels here.
 - RFC 3463 — Enhanced Mail System Status Codes (the SMTP extended codes the fallback chain uses).
-- RFC 3464 — DSN format (the envelope that carries diagnostic text; you parse this *outside* the classifier).
+- RFC 3464 — DSN format (the envelope that carries diagnostic text; you parse this _outside_ the classifier).

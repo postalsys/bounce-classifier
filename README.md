@@ -14,7 +14,7 @@ Runs entirely **client-side** in Node.js or the browser. No API calls, no PII le
 - High-volume bounce pipelines where per-classification API cost or latency matters.
 - Privacy-sensitive workloads where bounce bodies must not leave the process.
 - Offline / edge / browser contexts where a server call isn't an option.
-- Any time you want *action* (`remove` vs. `retry` vs. `fix_configuration`) rather than just a label.
+- Any time you want _action_ (`remove` vs. `retry` vs. `fix_configuration`) rather than just a label.
 
 ## When not to use
 
@@ -24,23 +24,23 @@ Runs entirely **client-side** in Node.js or the browser. No API calls, no PII le
 
 ## Labels
 
-| Label                | Description                        | Action             |
-| -------------------- | ---------------------------------- | ------------------ |
-| `user_unknown`       | Recipient doesn't exist            | remove             |
-| `invalid_address`    | Bad syntax, domain not found       | remove             |
-| `mailbox_disabled`   | Account suspended/disabled         | remove             |
-| `mailbox_full`       | Over quota, storage exceeded       | retry              |
-| `greylisting`        | Temporary rejection, retry later   | retry              |
-| `rate_limited`       | Too many connections/messages      | retry              |
-| `server_error`       | Timeout, connection failed         | retry              |
-| `ip_blacklisted`     | Sender IP on RBL                   | retry_different_ip |
-| `domain_blacklisted` | Sender domain on blocklist         | fix_configuration  |
-| `auth_failure`       | DMARC/SPF/DKIM failure             | fix_configuration  |
-| `relay_denied`       | Relaying not permitted             | fix_configuration  |
-| `spam_blocked`       | Message detected as spam           | review             |
-| `policy_blocked`     | Local policy rejection             | review             |
-| `virus_detected`     | Infected content detected          | remove_content     |
-| `geo_blocked`        | Geographic/country-based rejection | retry_different_ip |
+| Label                | Description                                                                                | Action             |
+| -------------------- | ------------------------------------------------------------------------------------------ | ------------------ |
+| `user_unknown`       | Recipient doesn't exist                                                                    | remove             |
+| `invalid_address`    | Bad syntax, domain not found                                                               | remove             |
+| `mailbox_disabled`   | Account suspended/disabled                                                                 | remove             |
+| `mailbox_full`       | Over quota, storage exceeded                                                               | retry              |
+| `greylisting`        | Temporary rejection, retry later                                                           | retry              |
+| `rate_limited`       | Too many connections/messages                                                              | retry              |
+| `server_error`       | Timeout, connection failed                                                                 | retry              |
+| `ip_blacklisted`     | Sender IP on RBL                                                                           | retry_different_ip |
+| `domain_blacklisted` | Sender domain on blocklist                                                                 | fix_configuration  |
+| `auth_failure`       | DMARC/SPF/DKIM failure                                                                     | fix_configuration  |
+| `relay_denied`       | Relaying not permitted                                                                     | fix_configuration  |
+| `spam_blocked`       | Message detected as spam                                                                   | review             |
+| `policy_blocked`     | Local policy rejection                                                                     | review             |
+| `virus_detected`     | Infected content detected                                                                  | remove_content     |
+| `geo_blocked`        | Geographic/country-based rejection                                                         | retry_different_ip |
 | `unknown`            | Unclassified — queue for review and [submit to the trainer](https://bounces.postalsys.com) | review             |
 
 ## Installation

@@ -823,7 +823,9 @@ describe("Classifier", () => {
         "551 User not local; please try forwarding",
       );
       assert.ok(
-        ["user_unknown", "invalid_address", "relay_denied"].includes(result.label),
+        ["user_unknown", "invalid_address", "relay_denied"].includes(
+          result.label,
+        ),
         `Expected user_unknown, invalid_address, or relay_denied, got ${result.label}`,
       );
     });
@@ -1304,10 +1306,7 @@ describe("classifyBatch", () => {
       async () => classifyBatch("not an array"),
       /expected an array/,
     );
-    await assert.rejects(
-      async () => classifyBatch(null),
-      /expected an array/,
-    );
+    await assert.rejects(async () => classifyBatch(null), /expected an array/);
   });
 
   it("should surface per-item error with .index", async () => {
@@ -1338,7 +1337,10 @@ describe("registerTextFallback / clearTextFallbacks", () => {
 
   it("should let a user pattern override built-in classification", async () => {
     const msg = "XYZZY-PROVIDER-42: bounce for unknown reason";
-    registerTextFallback({ pattern: /XYZZY-PROVIDER-\d+/, label: "spam_blocked" });
+    registerTextFallback({
+      pattern: /XYZZY-PROVIDER-\d+/,
+      label: "spam_blocked",
+    });
     const result = await classify(msg);
     assert.strictEqual(result.label, "spam_blocked");
     assert.strictEqual(result.usedFallback, true);
