@@ -14,7 +14,7 @@ async function main() {
         entryPoints: ['./src/index.js'],
         bundle: true,
         platform: 'node',
-        target: 'node18',
+        target: 'node20',
         format: 'cjs',
         outfile: './dist/index.cjs',
         banner: {
