@@ -94,11 +94,11 @@ Three-step normalization, then vocabulary mapping to a fixed-size `Int32Array(10
 
 ```javascript
 function preprocessText(text) {
-  return text
-    .toLowerCase() // case-fold
-    .replace(/[^\w\s]/g, " ") // punctuation → space
-    .replace(/\s+/g, " ") // collapse whitespace
-    .trim();
+    return text
+        .toLowerCase() // case-fold
+        .replace(/[^\w\s]/g, ' ') // punctuation → space
+        .replace(/\s+/g, ' ') // collapse whitespace
+        .trim();
 }
 ```
 
@@ -259,14 +259,11 @@ The classifier is intentionally opinionated but exposes three surfaces for custo
 ### 10.1 Custom text fallbacks
 
 ```javascript
-import {
-  registerTextFallback,
-  clearTextFallbacks,
-} from "@postalsys/bounce-classifier";
+import { registerTextFallback, clearTextFallbacks } from '@postalsys/bounce-classifier';
 
 registerTextFallback({
-  pattern: /XYZZY-PROVIDER-\d+/,
-  label: "spam_blocked",
+    pattern: /XYZZY-PROVIDER-\d+/,
+    label: 'spam_blocked'
 });
 ```
 

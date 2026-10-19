@@ -89,24 +89,24 @@ Total: 325,200 floats x 4 bytes = 1,300,800 bytes
 
 ```javascript
 function parseWeights(data) {
-  let offset = 0;
+    let offset = 0;
 
-  // Dense layer 1: kernel [64, 64] and bias [64]
-  const dense1Kernel = data.slice(offset, offset + 64 * 64);
-  offset += 64 * 64;
-  const dense1Bias = data.slice(offset, offset + 64);
-  offset += 64;
+    // Dense layer 1: kernel [64, 64] and bias [64]
+    const dense1Kernel = data.slice(offset, offset + 64 * 64);
+    offset += 64 * 64;
+    const dense1Bias = data.slice(offset, offset + 64);
+    offset += 64;
 
-  // Dense layer 2: kernel [64, 16] and bias [16]
-  const dense2Kernel = data.slice(offset, offset + 64 * 16);
-  offset += 64 * 16;
-  const dense2Bias = data.slice(offset, offset + 16);
-  offset += 16;
+    // Dense layer 2: kernel [64, 16] and bias [16]
+    const dense2Kernel = data.slice(offset, offset + 64 * 16);
+    offset += 64 * 16;
+    const dense2Bias = data.slice(offset, offset + 16);
+    offset += 16;
 
-  // Embedding: [5000, 64]
-  const embedding = data.slice(offset);
+    // Embedding: [5000, 64]
+    const embedding = data.slice(offset);
 
-  return { embedding, dense1Kernel, dense1Bias, dense2Kernel, dense2Bias };
+    return { embedding, dense1Kernel, dense1Bias, dense2Kernel, dense2Bias };
 }
 ```
 
@@ -124,23 +124,23 @@ The embedding layer maps each token ID to a 64-dimensional vector. GlobalAverage
 
 ```javascript
 function embeddingAndPool(tokens, embeddingWeights) {
-  const pooled = new Float32Array(EMBEDDING_DIM).fill(0);
+    const pooled = new Float32Array(EMBEDDING_DIM).fill(0);
 
-  // Sum embeddings for all tokens
-  for (let i = 0; i < MAX_LENGTH; i++) {
-    const tokenId = tokens[i];
-    const embOffset = tokenId * EMBEDDING_DIM;
-    for (let j = 0; j < EMBEDDING_DIM; j++) {
-      pooled[j] += embeddingWeights[embOffset + j];
+    // Sum embeddings for all tokens
+    for (let i = 0; i < MAX_LENGTH; i++) {
+        const tokenId = tokens[i];
+        const embOffset = tokenId * EMBEDDING_DIM;
+        for (let j = 0; j < EMBEDDING_DIM; j++) {
+            pooled[j] += embeddingWeights[embOffset + j];
+        }
     }
-  }
 
-  // Divide by sequence length (average over ALL timesteps)
-  for (let j = 0; j < EMBEDDING_DIM; j++) {
-    pooled[j] /= MAX_LENGTH;
-  }
+    // Divide by sequence length (average over ALL timesteps)
+    for (let j = 0; j < EMBEDDING_DIM; j++) {
+        pooled[j] /= MAX_LENGTH;
+    }
 
-  return pooled;
+    return pooled;
 }
 ```
 
@@ -152,18 +152,18 @@ Dense layers perform: `output = activation(input @ kernel + bias)`
 
 ```javascript
 function denseLayer(input, kernel, bias, inputDim, outputDim, activation) {
-  const output = new Float32Array(outputDim);
+    const output = new Float32Array(outputDim);
 
-  for (let i = 0; i < outputDim; i++) {
-    let sum = bias[i];
-    for (let j = 0; j < inputDim; j++) {
-      // Kernel layout: [inputDim, outputDim] in row-major order
-      sum += input[j] * kernel[j * outputDim + i];
+    for (let i = 0; i < outputDim; i++) {
+        let sum = bias[i];
+        for (let j = 0; j < inputDim; j++) {
+            // Kernel layout: [inputDim, outputDim] in row-major order
+            sum += input[j] * kernel[j * outputDim + i];
+        }
+        output[i] = activation(sum);
     }
-    output[i] = activation(sum);
-  }
 
-  return output;
+    return output;
 }
 ```
 
@@ -173,7 +173,7 @@ function denseLayer(input, kernel, bias, inputDim, outputDim, activation) {
 
 ```javascript
 function relu(x) {
-  return Math.max(0, x);
+    return Math.max(0, x);
 }
 ```
 
@@ -181,11 +181,11 @@ function relu(x) {
 
 ```javascript
 function softmax(arr) {
-  // Subtract max for numerical stability
-  const max = Math.max(...arr);
-  const exps = arr.map((x) => Math.exp(x - max));
-  const sum = exps.reduce((a, b) => a + b, 0);
-  return exps.map((e) => e / sum);
+    // Subtract max for numerical stability
+    const max = Math.max(...arr);
+    const exps = arr.map(x => Math.exp(x - max));
+    const sum = exps.reduce((a, b) => a + b, 0);
+    return exps.map(e => e / sum);
 }
 ```
 
@@ -193,41 +193,41 @@ function softmax(arr) {
 
 ```javascript
 function forward(tokens) {
-  // 1. Embedding lookup + global average pooling
-  const pooled = new Float32Array(EMBEDDING_DIM).fill(0);
-  for (let i = 0; i < tokens.length; i++) {
-    const tokenId = tokens[i];
-    const embOffset = tokenId * EMBEDDING_DIM;
+    // 1. Embedding lookup + global average pooling
+    const pooled = new Float32Array(EMBEDDING_DIM).fill(0);
+    for (let i = 0; i < tokens.length; i++) {
+        const tokenId = tokens[i];
+        const embOffset = tokenId * EMBEDDING_DIM;
+        for (let j = 0; j < EMBEDDING_DIM; j++) {
+            pooled[j] += weights.embedding[embOffset + j];
+        }
+    }
     for (let j = 0; j < EMBEDDING_DIM; j++) {
-      pooled[j] += weights.embedding[embOffset + j];
+        pooled[j] /= MAX_LENGTH;
     }
-  }
-  for (let j = 0; j < EMBEDDING_DIM; j++) {
-    pooled[j] /= MAX_LENGTH;
-  }
 
-  // 2. Dense layer 1: [64] -> [64] with ReLU
-  const hidden = new Float32Array(64);
-  for (let i = 0; i < 64; i++) {
-    let sum = weights.dense1Bias[i];
-    for (let j = 0; j < 64; j++) {
-      sum += pooled[j] * weights.dense1Kernel[j * 64 + i];
+    // 2. Dense layer 1: [64] -> [64] with ReLU
+    const hidden = new Float32Array(64);
+    for (let i = 0; i < 64; i++) {
+        let sum = weights.dense1Bias[i];
+        for (let j = 0; j < 64; j++) {
+            sum += pooled[j] * weights.dense1Kernel[j * 64 + i];
+        }
+        hidden[i] = relu(sum);
     }
-    hidden[i] = relu(sum);
-  }
 
-  // 3. Dense layer 2: [64] -> [16]
-  const output = new Float32Array(NUM_LABELS);
-  for (let i = 0; i < NUM_LABELS; i++) {
-    let sum = weights.dense2Bias[i];
-    for (let j = 0; j < 64; j++) {
-      sum += hidden[j] * weights.dense2Kernel[j * NUM_LABELS + i];
+    // 3. Dense layer 2: [64] -> [16]
+    const output = new Float32Array(NUM_LABELS);
+    for (let i = 0; i < NUM_LABELS; i++) {
+        let sum = weights.dense2Bias[i];
+        for (let j = 0; j < 64; j++) {
+            sum += hidden[j] * weights.dense2Kernel[j * NUM_LABELS + i];
+        }
+        output[i] = sum;
     }
-    output[i] = sum;
-  }
 
-  // 4. Softmax activation
-  return softmax(Array.from(output));
+    // 4. Softmax activation
+    return softmax(Array.from(output));
 }
 ```
 
@@ -243,11 +243,11 @@ Raw Text -> Lowercase -> Remove Punctuation -> Whitespace Normalize -> Split -> 
 
 ```javascript
 function preprocessText(text) {
-  return text
-    .toLowerCase() // Case folding
-    .replace(/[^\w\s]/g, " ") // Remove punctuation
-    .replace(/\s+/g, " ") // Collapse whitespace
-    .trim();
+    return text
+        .toLowerCase() // Case folding
+        .replace(/[^\w\s]/g, ' ') // Remove punctuation
+        .replace(/\s+/g, ' ') // Collapse whitespace
+        .trim();
 }
 ```
 
@@ -263,20 +263,20 @@ The vocabulary is loaded from `vocab.json` as an ordered array. Token IDs are ar
 
 ```javascript
 function tokenize(text) {
-  const processed = preprocessText(text);
-  const words = processed.split(" ");
-  const tokens = new Array(MAX_LENGTH).fill(0); // Pad with zeros
+    const processed = preprocessText(text);
+    const words = processed.split(' ');
+    const tokens = new Array(MAX_LENGTH).fill(0); // Pad with zeros
 
-  for (let i = 0; i < Math.min(words.length, MAX_LENGTH); i++) {
-    const word = words[i];
-    if (vocabMap.has(word)) {
-      tokens[i] = vocabMap.get(word);
-    } else {
-      tokens[i] = 1; // OOV token
+    for (let i = 0; i < Math.min(words.length, MAX_LENGTH); i++) {
+        const word = words[i];
+        if (vocabMap.has(word)) {
+            tokens[i] = vocabMap.get(word);
+        } else {
+            tokens[i] = 1; // OOV token
+        }
     }
-  }
 
-  return tokens;
+    return tokens;
 }
 ```
 
@@ -298,17 +298,17 @@ Node.js modules are loaded lazily to avoid browser errors:
 
 ```javascript
 let _fs = null,
-  _path = null,
-  _url = null;
+    _path = null,
+    _url = null;
 let _nodeModulesLoaded = false;
 
 async function loadNodeModules() {
-  if (_nodeModulesLoaded || isBrowser) return;
-  _nodeModulesLoaded = true;
+    if (_nodeModulesLoaded || isBrowser) return;
+    _nodeModulesLoaded = true;
 
-  _fs = await import("fs");
-  _path = await import("path");
-  _url = await import("url");
+    _fs = await import('fs');
+    _path = await import('path');
+    _url = await import('url');
 }
 ```
 

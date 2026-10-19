@@ -3,1439 +3,1221 @@
  * Uses Node.js built-in test runner and assert library
  */
 
-import { describe, it, before, after, afterEach } from "node:test";
-import assert from "node:assert";
-import {
-  mkdtempSync,
-  rmSync,
-  copyFileSync,
-  writeFileSync,
-  readdirSync,
-} from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { describe, it, before, after, afterEach } from 'node:test';
+import assert from 'node:assert';
+import { mkdtempSync, rmSync, copyFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import {
-  classify,
-  classifyBatch,
-  initialize,
-  getLabels,
-  isReady,
-  reset,
-  reload,
-  getModelInfo,
-  registerTextFallback,
-  clearTextFallbacks,
-  extractSmtpCodes,
-  extractRetryTiming,
-  identifyBlocklist,
-  getAction,
-  getCodeBasedFallback,
-  getTextBasedFallback,
-  ACTION_MAP,
-  SMTP_CODE_MAP,
-  SMTP_MAIN_CODE_MAP,
-  BLOCKLIST_PATTERNS,
-  CODE_FALLBACK_THRESHOLD,
-} from "../src/index.js";
+    classify,
+    classifyBatch,
+    initialize,
+    getLabels,
+    isReady,
+    reset,
+    reload,
+    getModelInfo,
+    registerTextFallback,
+    clearTextFallbacks,
+    extractSmtpCodes,
+    extractRetryTiming,
+    identifyBlocklist,
+    getAction,
+    getCodeBasedFallback,
+    getTextBasedFallback,
+    ACTION_MAP,
+    SMTP_CODE_MAP,
+    SMTP_MAIN_CODE_MAP,
+    BLOCKLIST_PATTERNS,
+    CODE_FALLBACK_THRESHOLD
+} from '../src/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MODEL_DIR = resolve(__dirname, "..", "model");
+const MODEL_DIR = resolve(__dirname, '..', 'model');
 
 /**
  * Build a temporary model dir that mirrors `model/`, with config.json
  * replaced by the supplied object. Returns { path, cleanup }.
  */
 function makeTmpModel(configOverride) {
-  const tmp = mkdtempSync(join(tmpdir(), "bounce-test-"));
-  for (const file of readdirSync(MODEL_DIR)) {
-    if (file === "config.json") continue;
-    copyFileSync(join(MODEL_DIR, file), join(tmp, file));
-  }
-  writeFileSync(
-    join(tmp, "config.json"),
-    JSON.stringify(configOverride),
-    "utf8",
-  );
-  return {
-    path: tmp,
-    cleanup: () => rmSync(tmp, { recursive: true, force: true }),
-  };
+    const tmp = mkdtempSync(join(tmpdir(), 'bounce-test-'));
+    for (const file of readdirSync(MODEL_DIR)) {
+        if (file === 'config.json') continue;
+        copyFileSync(join(MODEL_DIR, file), join(tmp, file));
+    }
+    writeFileSync(join(tmp, 'config.json'), JSON.stringify(configOverride), 'utf8');
+    return {
+        path: tmp,
+        cleanup: () => rmSync(tmp, { recursive: true, force: true })
+    };
 }
 
-describe("Helper Functions", () => {
-  describe("extractSmtpCodes", () => {
-    it("should extract main SMTP code", () => {
-      const result = extractSmtpCodes("550 User unknown");
-      assert.strictEqual(result.mainCode, "550");
-      assert.strictEqual(result.extendedCode, null);
+describe('Helper Functions', () => {
+    describe('extractSmtpCodes', () => {
+        it('should extract main SMTP code', () => {
+            const result = extractSmtpCodes('550 User unknown');
+            assert.strictEqual(result.mainCode, '550');
+            assert.strictEqual(result.extendedCode, null);
+        });
+
+        it('should extract extended SMTP code', () => {
+            const result = extractSmtpCodes('550 5.1.1 User unknown');
+            assert.strictEqual(result.mainCode, '550');
+            assert.strictEqual(result.extendedCode, '5.1.1');
+        });
+
+        it('should handle 4xx codes', () => {
+            const result = extractSmtpCodes('421 4.7.0 Try again later');
+            assert.strictEqual(result.mainCode, '421');
+            assert.strictEqual(result.extendedCode, '4.7.0');
+        });
+
+        it('should return null for missing codes', () => {
+            const result = extractSmtpCodes('Connection refused');
+            assert.strictEqual(result.mainCode, null);
+            assert.strictEqual(result.extendedCode, null);
+        });
+
+        it('should handle codes with hyphens', () => {
+            const result = extractSmtpCodes('550-5.1.1 User unknown');
+            assert.strictEqual(result.mainCode, '550');
+            assert.strictEqual(result.extendedCode, '5.1.1');
+        });
+
+        it('should extract extended codes with multi-digit subparts', () => {
+            const result = extractSmtpCodes('550 5.7.23 SPF validation failed');
+            assert.strictEqual(result.extendedCode, '5.7.23');
+        });
+
+        it('should not extract IPv4 first three octets as extended code', () => {
+            // Regression: prior to fix, `5.7.1.100` yielded `5.7.1`, causing the
+            // SMTP-code fallback to misclassify the bounce as policy_blocked.
+            const a = extractSmtpCodes('550 IP 5.7.1.100 is blacklisted');
+            assert.strictEqual(a.extendedCode, null);
+            assert.strictEqual(a.mainCode, '550');
+
+            const b = extractSmtpCodes('Server at 5.2.2.50 rejected');
+            assert.strictEqual(b.extendedCode, null);
+
+            const c = extractSmtpCodes('IP 4.7.0.50 blocked');
+            assert.strictEqual(c.extendedCode, null);
+
+            const d = extractSmtpCodes('550 5.7.1.0 not a code');
+            assert.strictEqual(d.extendedCode, null);
+
+            // Sanity: a real code adjacent to other text still works.
+            const e = extractSmtpCodes('v1.2 5.7.1 result');
+            assert.strictEqual(e.extendedCode, '5.7.1');
+        });
+    });
+
+    describe('extractRetryTiming', () => {
+        it('should extract seconds', () => {
+            assert.strictEqual(extractRetryTiming('Try again in 30 seconds'), 30);
+        });
+
+        it('should extract minutes and convert to seconds', () => {
+            assert.strictEqual(extractRetryTiming('Retry in 5 minutes'), 300);
+        });
+
+        it('should extract hours and convert to seconds', () => {
+            assert.strictEqual(extractRetryTiming('Wait 1 hour before retrying'), 3600);
+        });
+
+        it('should handle greylisting messages', () => {
+            const result = extractRetryTiming('Greylisted for 300 seconds');
+            assert.strictEqual(result, 300);
+        });
+
+        it('should return null when no timing found', () => {
+            assert.strictEqual(extractRetryTiming('User unknown'), null);
+        });
+
+        it('should handle abbreviated units', () => {
+            assert.strictEqual(extractRetryTiming('Wait 10 min'), 600);
+            assert.strictEqual(extractRetryTiming('Retry in 2 hr'), 7200);
+        });
+    });
+
+    describe('identifyBlocklist', () => {
+        it('should identify Spamhaus', () => {
+            const result = identifyBlocklist('Blocked by spamhaus.org');
+            assert.strictEqual(result.name, 'Spamhaus');
+            assert.strictEqual(result.type, 'ip');
+        });
+
+        it('should identify Spamhaus ZEN', () => {
+            const result = identifyBlocklist('Listed in zen.spamhaus.org');
+            // May return lists array when multiple patterns match (zen + spamhaus)
+            const name = result.name || (result.lists && result.lists[0]?.name);
+            assert.ok(name === 'Spamhaus ZEN' || name === 'Spamhaus', `Expected Spamhaus ZEN or Spamhaus, got: ${name}`);
+        });
+
+        it('should identify Barracuda', () => {
+            const result = identifyBlocklist('Blocked by Barracuda');
+            assert.strictEqual(result.name, 'Barracuda');
+        });
+
+        it('should identify SpamCop', () => {
+            const result = identifyBlocklist('Listed in spamcop.net');
+            assert.strictEqual(result.name, 'SpamCop');
+        });
+
+        it('should identify SORBS', () => {
+            const result = identifyBlocklist('Blocked by dnsbl.sorbs.net');
+            assert.strictEqual(result.name, 'SORBS');
+        });
+
+        it('should identify generic RBL', () => {
+            const result = identifyBlocklist('IP listed in RBL');
+            assert.strictEqual(result.name, 'RBL');
+        });
+
+        it('should return null when no blocklist found', () => {
+            assert.strictEqual(identifyBlocklist('User unknown'), null);
+        });
+
+        it('should identify multiple blocklists', () => {
+            const result = identifyBlocklist('Blocked by spamhaus.org and barracuda');
+            assert.ok(result.lists);
+            assert.strictEqual(result.lists.length, 2);
+        });
+
+        it('should identify URIBL', () => {
+            const result = identifyBlocklist('URL blocked by uribl.com');
+            assert.strictEqual(result.name, 'URIBL');
+            assert.strictEqual(result.type, 'uri');
+        });
+
+        it('should identify Spamhaus DBL as domain type', () => {
+            const result = identifyBlocklist('Domain in dbl.spamhaus.org');
+            // May return lists array when multiple patterns match (dbl + spamhaus)
+            const entry = result.lists ? result.lists[0] : result;
+            assert.ok(entry.name === 'Spamhaus DBL' || entry.name === 'Spamhaus', `Expected Spamhaus DBL or Spamhaus, got: ${entry.name}`);
+        });
+
+        it('should identify Cloudmark', () => {
+            const result = identifyBlocklist('Blocked by Cloudmark');
+            assert.strictEqual(result.name, 'Cloudmark');
+        });
+
+        it('should identify Proofpoint', () => {
+            const result = identifyBlocklist('521 5.7.1 Service unavailable; client [192.0.2.1] blocked using prs.proofpoint.com');
+            assert.strictEqual(result.name, 'Proofpoint');
+        });
+
+        it('should not treat a vendor name alone as a blocklist', () => {
+            for (const msg of [
+                '550 Invalid Recipient - https://community.mimecast.com/docs/DOC-1369#550',
+                '550 5.1.1 User unknown. Protected by Barracuda Networks',
+                'Rejected by Proofpoint',
+                '554 Message rejected due to content restrictions - Cloudmark',
+                '550 Mailbox unavailable (Trend Micro)',
+                'RBL check failed'
+            ]) {
+                assert.strictEqual(identifyBlocklist(msg), null, msg);
+            }
+        });
+
+        it('should identify vendor lookup hostnames', () => {
+            assert.strictEqual(identifyBlocklist('554 Client host [192.0.2.1] blocked using b.barracudacentral.org').name, 'Barracuda');
+            assert.strictEqual(
+                identifyBlocklist('550 5.7.1 Poor Reputation Sender. - https://csi.cloudmark.com/reset-request/?ip=192.0.2.1').name,
+                'Cloudmark'
+            );
+        });
+
+        it('should report whether a DNSBL hostname matched', () => {
+            assert.strictEqual(identifyBlocklist('blocked using b.barracudacentral.org').host, true);
+            assert.strictEqual(identifyBlocklist('Blocked by Mimecast').host, false);
+            assert.deepStrictEqual(identifyBlocklist('rejected, listed on rbl.example.org'), { name: 'RBL', type: 'ip', host: true });
+            assert.deepStrictEqual(identifyBlocklist('Your IP is listed in an RBL'), {
+                name: 'RBL',
+                type: 'ip',
+                host: false
+            });
+            // "rbl" inside an unrelated domain label is not a DNSBL hostname
+            assert.strictEqual(identifyBlocklist('550 marblehead.com rejected'), null);
+        });
+
+        it('should identify Mimecast', () => {
+            const result = identifyBlocklist('Blocked by Mimecast');
+            assert.strictEqual(result.name, 'Mimecast');
+        });
+
+        it('should identify Invaluement', () => {
+            const result = identifyBlocklist('Listed in invaluement');
+            assert.strictEqual(result.name, 'Invaluement');
+        });
+
+        it('should identify Trend Micro', () => {
+            const result = identifyBlocklist('Blocked by Trend Micro');
+            assert.strictEqual(result.name, 'Trend Micro');
+        });
+
+        it('should identify generic DNSBL', () => {
+            const result = identifyBlocklist('IP listed in DNSBL');
+            assert.strictEqual(result.name, 'DNSBL');
+        });
+
+        it('should identify Spamhaus SBL', () => {
+            const result = identifyBlocklist('Listed in SBL');
+            assert.strictEqual(result.name, 'Spamhaus SBL');
+        });
+
+        it('should identify Spamhaus XBL', () => {
+            const result = identifyBlocklist('Listed in XBL');
+            assert.strictEqual(result.name, 'Spamhaus XBL');
+        });
+
+        it('should identify Spamhaus PBL', () => {
+            const result = identifyBlocklist('Listed in PBL');
+            assert.strictEqual(result.name, 'Spamhaus PBL');
+        });
+    });
+
+    describe('getAction', () => {
+        it('should return remove for user_unknown', () => {
+            assert.strictEqual(getAction('user_unknown'), 'remove');
+        });
+
+        it('should return remove for invalid_address', () => {
+            assert.strictEqual(getAction('invalid_address'), 'remove');
+        });
+
+        it('should return remove for mailbox_disabled', () => {
+            assert.strictEqual(getAction('mailbox_disabled'), 'remove');
+        });
+
+        it('should return retry for greylisting', () => {
+            assert.strictEqual(getAction('greylisting'), 'retry');
+        });
+
+        it('should return retry for rate_limited', () => {
+            assert.strictEqual(getAction('rate_limited'), 'retry');
+        });
+
+        it('should return retry for server_error', () => {
+            assert.strictEqual(getAction('server_error'), 'retry');
+        });
+
+        it('should return retry for mailbox_full', () => {
+            assert.strictEqual(getAction('mailbox_full'), 'retry');
+        });
+
+        it('should return retry_different_ip for ip_blacklisted', () => {
+            assert.strictEqual(getAction('ip_blacklisted'), 'retry_different_ip');
+        });
+
+        it('should return retry_different_ip for geo_blocked', () => {
+            assert.strictEqual(getAction('geo_blocked'), 'retry_different_ip');
+        });
+
+        it('should return fix_configuration for auth_failure', () => {
+            assert.strictEqual(getAction('auth_failure'), 'fix_configuration');
+        });
+
+        it('should return fix_configuration for domain_blacklisted', () => {
+            assert.strictEqual(getAction('domain_blacklisted'), 'fix_configuration');
+        });
+
+        it('should return fix_configuration for relay_denied', () => {
+            assert.strictEqual(getAction('relay_denied'), 'fix_configuration');
+        });
+
+        it('should return review for spam_blocked', () => {
+            assert.strictEqual(getAction('spam_blocked'), 'review');
+        });
+
+        it('should return review for policy_blocked', () => {
+            assert.strictEqual(getAction('policy_blocked'), 'review');
+        });
+
+        it('should return remove_content for virus_detected', () => {
+            assert.strictEqual(getAction('virus_detected'), 'remove_content');
+        });
+
+        it('should return review for unknown category', () => {
+            assert.strictEqual(getAction('unknown'), 'review');
+        });
+
+        it('should return review for undefined category', () => {
+            assert.strictEqual(getAction('nonexistent'), 'review');
+        });
+    });
+
+    describe('getTextBasedFallback', () => {
+        it('should detect user unknown patterns', () => {
+            assert.strictEqual(getTextBasedFallback("This user doesn't have a gmail account"), 'user_unknown');
+            assert.strictEqual(getTextBasedFallback('No such user here'), 'user_unknown');
+            assert.strictEqual(getTextBasedFallback('Mailbox not found'), 'user_unknown');
+        });
+
+        it('should detect auth failure patterns', () => {
+            assert.strictEqual(getTextBasedFallback('The sender is unauthenticated'), 'auth_failure');
+        });
+
+        it('should return null for unmatched patterns', () => {
+            assert.strictEqual(getTextBasedFallback('Some random error'), null);
+        });
+    });
+
+    describe('getCodeBasedFallback', () => {
+        it('should use text pattern first', () => {
+            assert.strictEqual(getCodeBasedFallback('550 No such user here'), 'user_unknown');
+        });
+
+        it('should fall back to extended SMTP code', () => {
+            assert.strictEqual(getCodeBasedFallback('550 5.2.2 Mailbox quota exceeded'), 'mailbox_full');
+        });
+
+        it('should fall back to main SMTP code', () => {
+            assert.strictEqual(getCodeBasedFallback('552 Message too large'), 'mailbox_full');
+        });
+
+        it('should return null when no fallback matches', () => {
+            assert.strictEqual(getCodeBasedFallback('Something went wrong'), null);
+        });
+    });
+
+    describe('SMTP_CODE_MAP coverage', () => {
+        it('should have mappings for common extended codes', () => {
+            assert.strictEqual(SMTP_CODE_MAP['5.1.1'], 'user_unknown');
+            assert.strictEqual(SMTP_CODE_MAP['5.2.2'], 'mailbox_full');
+            assert.strictEqual(SMTP_CODE_MAP['5.7.1'], 'policy_blocked');
+            assert.strictEqual(SMTP_CODE_MAP['4.7.0'], 'rate_limited');
+        });
+    });
+
+    describe('SMTP_MAIN_CODE_MAP coverage', () => {
+        it('should have mappings for common main codes', () => {
+            assert.strictEqual(SMTP_MAIN_CODE_MAP[550], 'user_unknown');
+            assert.strictEqual(SMTP_MAIN_CODE_MAP[552], 'mailbox_full');
+            assert.strictEqual(SMTP_MAIN_CODE_MAP[421], 'greylisting');
+            assert.strictEqual(SMTP_MAIN_CODE_MAP[554], 'policy_blocked');
+        });
+    });
+
+    describe('ACTION_MAP coverage', () => {
+        it('should have actions for all bounce categories', () => {
+            const expectedActions = ['remove', 'retry', 'retry_different_ip', 'fix_configuration', 'review', 'remove_content'];
+            const actions = Object.values(ACTION_MAP);
+            for (const action of expectedActions) {
+                assert.ok(actions.includes(action), `Missing action: ${action}`);
+            }
+        });
+
+        it('should have mappings for all 16 categories', () => {
+            const expectedCategories = [
+                'user_unknown',
+                'invalid_address',
+                'mailbox_disabled',
+                'greylisting',
+                'rate_limited',
+                'server_error',
+                'mailbox_full',
+                'ip_blacklisted',
+                'domain_blacklisted',
+                'auth_failure',
+                'spam_blocked',
+                'policy_blocked',
+                'virus_detected',
+                'geo_blocked',
+                'relay_denied',
+                'unknown'
+            ];
+            for (const category of expectedCategories) {
+                assert.ok(ACTION_MAP[category] !== undefined, `Missing action for: ${category}`);
+            }
+        });
+    });
+
+    describe('BLOCKLIST_PATTERNS', () => {
+        it('should be an array', () => {
+            assert.ok(Array.isArray(BLOCKLIST_PATTERNS));
+        });
+
+        it('should have pattern, name, and type for each entry', () => {
+            for (const entry of BLOCKLIST_PATTERNS) {
+                assert.ok(entry.pattern instanceof RegExp, 'pattern should be RegExp');
+                assert.ok(typeof entry.name === 'string', 'name should be string');
+                assert.ok(['ip', 'domain', 'uri'].includes(entry.type), 'type should be ip, domain, or uri');
+            }
+        });
+
+        it('should include major blocklist providers', () => {
+            const names = BLOCKLIST_PATTERNS.map(p => p.name);
+            assert.ok(names.includes('Spamhaus'), 'Should include Spamhaus');
+            assert.ok(names.includes('Barracuda'), 'Should include Barracuda');
+            assert.ok(names.includes('SpamCop'), 'Should include SpamCop');
+            assert.ok(names.includes('SORBS'), 'Should include SORBS');
+        });
+    });
+
+    describe('CODE_FALLBACK_THRESHOLD', () => {
+        it('should be a number between 0 and 1', () => {
+            assert.ok(typeof CODE_FALLBACK_THRESHOLD === 'number');
+            assert.ok(CODE_FALLBACK_THRESHOLD >= 0);
+            assert.ok(CODE_FALLBACK_THRESHOLD <= 1);
+        });
+
+        it('should be 0.5 (50% confidence threshold)', () => {
+            assert.strictEqual(CODE_FALLBACK_THRESHOLD, 0.5);
+        });
+    });
+
+    describe('extractRetryTiming edge cases', () => {
+        it('should handle too many requests pattern', () => {
+            const result = extractRetryTiming('Too many requests, wait 60 seconds');
+            assert.strictEqual(result, 60);
+        });
+
+        it('should handle come back later pattern', () => {
+            const result = extractRetryTiming('Come back in 10 minutes');
+            assert.strictEqual(result, 600);
+        });
+
+        it('should handle after pattern', () => {
+            const result = extractRetryTiming('Try after 30 seconds');
+            assert.strictEqual(result, 30);
+        });
+
+        it('should reject unreasonably large values', () => {
+            // Values over 86400 seconds (24 hours) should be rejected
+            const result = extractRetryTiming('Wait 100000 seconds');
+            assert.strictEqual(result, null);
+        });
+
+        it('should handle plural units', () => {
+            assert.strictEqual(extractRetryTiming('Wait 2 hours'), 7200);
+            assert.strictEqual(extractRetryTiming('Wait 30 seconds'), 30);
+            assert.strictEqual(extractRetryTiming('Wait 5 minutes'), 300);
+        });
     });
-
-    it("should extract extended SMTP code", () => {
-      const result = extractSmtpCodes("550 5.1.1 User unknown");
-      assert.strictEqual(result.mainCode, "550");
-      assert.strictEqual(result.extendedCode, "5.1.1");
-    });
-
-    it("should handle 4xx codes", () => {
-      const result = extractSmtpCodes("421 4.7.0 Try again later");
-      assert.strictEqual(result.mainCode, "421");
-      assert.strictEqual(result.extendedCode, "4.7.0");
-    });
-
-    it("should return null for missing codes", () => {
-      const result = extractSmtpCodes("Connection refused");
-      assert.strictEqual(result.mainCode, null);
-      assert.strictEqual(result.extendedCode, null);
-    });
-
-    it("should handle codes with hyphens", () => {
-      const result = extractSmtpCodes("550-5.1.1 User unknown");
-      assert.strictEqual(result.mainCode, "550");
-      assert.strictEqual(result.extendedCode, "5.1.1");
-    });
-
-    it("should extract extended codes with multi-digit subparts", () => {
-      const result = extractSmtpCodes("550 5.7.23 SPF validation failed");
-      assert.strictEqual(result.extendedCode, "5.7.23");
-    });
-
-    it("should not extract IPv4 first three octets as extended code", () => {
-      // Regression: prior to fix, `5.7.1.100` yielded `5.7.1`, causing the
-      // SMTP-code fallback to misclassify the bounce as policy_blocked.
-      const a = extractSmtpCodes("550 IP 5.7.1.100 is blacklisted");
-      assert.strictEqual(a.extendedCode, null);
-      assert.strictEqual(a.mainCode, "550");
-
-      const b = extractSmtpCodes("Server at 5.2.2.50 rejected");
-      assert.strictEqual(b.extendedCode, null);
-
-      const c = extractSmtpCodes("IP 4.7.0.50 blocked");
-      assert.strictEqual(c.extendedCode, null);
-
-      const d = extractSmtpCodes("550 5.7.1.0 not a code");
-      assert.strictEqual(d.extendedCode, null);
-
-      // Sanity: a real code adjacent to other text still works.
-      const e = extractSmtpCodes("v1.2 5.7.1 result");
-      assert.strictEqual(e.extendedCode, "5.7.1");
-    });
-  });
-
-  describe("extractRetryTiming", () => {
-    it("should extract seconds", () => {
-      assert.strictEqual(extractRetryTiming("Try again in 30 seconds"), 30);
-    });
-
-    it("should extract minutes and convert to seconds", () => {
-      assert.strictEqual(extractRetryTiming("Retry in 5 minutes"), 300);
-    });
-
-    it("should extract hours and convert to seconds", () => {
-      assert.strictEqual(
-        extractRetryTiming("Wait 1 hour before retrying"),
-        3600,
-      );
-    });
-
-    it("should handle greylisting messages", () => {
-      const result = extractRetryTiming("Greylisted for 300 seconds");
-      assert.strictEqual(result, 300);
-    });
-
-    it("should return null when no timing found", () => {
-      assert.strictEqual(extractRetryTiming("User unknown"), null);
-    });
-
-    it("should handle abbreviated units", () => {
-      assert.strictEqual(extractRetryTiming("Wait 10 min"), 600);
-      assert.strictEqual(extractRetryTiming("Retry in 2 hr"), 7200);
-    });
-  });
-
-  describe("identifyBlocklist", () => {
-    it("should identify Spamhaus", () => {
-      const result = identifyBlocklist("Blocked by spamhaus.org");
-      assert.strictEqual(result.name, "Spamhaus");
-      assert.strictEqual(result.type, "ip");
-    });
-
-    it("should identify Spamhaus ZEN", () => {
-      const result = identifyBlocklist("Listed in zen.spamhaus.org");
-      // May return lists array when multiple patterns match (zen + spamhaus)
-      const name = result.name || (result.lists && result.lists[0]?.name);
-      assert.ok(
-        name === "Spamhaus ZEN" || name === "Spamhaus",
-        `Expected Spamhaus ZEN or Spamhaus, got: ${name}`,
-      );
-    });
-
-    it("should identify Barracuda", () => {
-      const result = identifyBlocklist("Blocked by Barracuda");
-      assert.strictEqual(result.name, "Barracuda");
-    });
-
-    it("should identify SpamCop", () => {
-      const result = identifyBlocklist("Listed in spamcop.net");
-      assert.strictEqual(result.name, "SpamCop");
-    });
-
-    it("should identify SORBS", () => {
-      const result = identifyBlocklist("Blocked by dnsbl.sorbs.net");
-      assert.strictEqual(result.name, "SORBS");
-    });
-
-    it("should identify generic RBL", () => {
-      const result = identifyBlocklist("IP listed in RBL");
-      assert.strictEqual(result.name, "RBL");
-    });
-
-    it("should return null when no blocklist found", () => {
-      assert.strictEqual(identifyBlocklist("User unknown"), null);
-    });
-
-    it("should identify multiple blocklists", () => {
-      const result = identifyBlocklist("Blocked by spamhaus.org and barracuda");
-      assert.ok(result.lists);
-      assert.strictEqual(result.lists.length, 2);
-    });
-
-    it("should identify URIBL", () => {
-      const result = identifyBlocklist("URL blocked by uribl.com");
-      assert.strictEqual(result.name, "URIBL");
-      assert.strictEqual(result.type, "uri");
-    });
-
-    it("should identify Spamhaus DBL as domain type", () => {
-      const result = identifyBlocklist("Domain in dbl.spamhaus.org");
-      // May return lists array when multiple patterns match (dbl + spamhaus)
-      const entry = result.lists ? result.lists[0] : result;
-      assert.ok(
-        entry.name === "Spamhaus DBL" || entry.name === "Spamhaus",
-        `Expected Spamhaus DBL or Spamhaus, got: ${entry.name}`,
-      );
-    });
-
-    it("should identify Cloudmark", () => {
-      const result = identifyBlocklist("Blocked by Cloudmark");
-      assert.strictEqual(result.name, "Cloudmark");
-    });
-
-    it("should identify Proofpoint", () => {
-      const result = identifyBlocklist(
-        "521 5.7.1 Service unavailable; client [192.0.2.1] blocked using prs.proofpoint.com",
-      );
-      assert.strictEqual(result.name, "Proofpoint");
-    });
-
-    it("should not treat a vendor name alone as a blocklist", () => {
-      for (const msg of [
-        "550 Invalid Recipient - https://community.mimecast.com/docs/DOC-1369#550",
-        "550 5.1.1 User unknown. Protected by Barracuda Networks",
-        "Rejected by Proofpoint",
-        "554 Message rejected due to content restrictions - Cloudmark",
-        "550 Mailbox unavailable (Trend Micro)",
-        "RBL check failed",
-      ]) {
-        assert.strictEqual(identifyBlocklist(msg), null, msg);
-      }
-    });
-
-    it("should identify vendor lookup hostnames", () => {
-      assert.strictEqual(
-        identifyBlocklist(
-          "554 Client host [192.0.2.1] blocked using b.barracudacentral.org",
-        ).name,
-        "Barracuda",
-      );
-      assert.strictEqual(
-        identifyBlocklist(
-          "550 5.7.1 Poor Reputation Sender. - https://csi.cloudmark.com/reset-request/?ip=192.0.2.1",
-        ).name,
-        "Cloudmark",
-      );
-    });
-
-    it("should report whether a DNSBL hostname matched", () => {
-      assert.strictEqual(
-        identifyBlocklist("blocked using b.barracudacentral.org").host,
-        true,
-      );
-      assert.strictEqual(identifyBlocklist("Blocked by Mimecast").host, false);
-      assert.deepStrictEqual(
-        identifyBlocklist("rejected, listed on rbl.example.org"),
-        { name: "RBL", type: "ip", host: true },
-      );
-      assert.deepStrictEqual(identifyBlocklist("Your IP is listed in an RBL"), {
-        name: "RBL",
-        type: "ip",
-        host: false,
-      });
-      // "rbl" inside an unrelated domain label is not a DNSBL hostname
-      assert.strictEqual(
-        identifyBlocklist("550 marblehead.com rejected"),
-        null,
-      );
-    });
-
-    it("should identify Mimecast", () => {
-      const result = identifyBlocklist("Blocked by Mimecast");
-      assert.strictEqual(result.name, "Mimecast");
-    });
-
-    it("should identify Invaluement", () => {
-      const result = identifyBlocklist("Listed in invaluement");
-      assert.strictEqual(result.name, "Invaluement");
-    });
-
-    it("should identify Trend Micro", () => {
-      const result = identifyBlocklist("Blocked by Trend Micro");
-      assert.strictEqual(result.name, "Trend Micro");
-    });
-
-    it("should identify generic DNSBL", () => {
-      const result = identifyBlocklist("IP listed in DNSBL");
-      assert.strictEqual(result.name, "DNSBL");
-    });
-
-    it("should identify Spamhaus SBL", () => {
-      const result = identifyBlocklist("Listed in SBL");
-      assert.strictEqual(result.name, "Spamhaus SBL");
-    });
-
-    it("should identify Spamhaus XBL", () => {
-      const result = identifyBlocklist("Listed in XBL");
-      assert.strictEqual(result.name, "Spamhaus XBL");
-    });
-
-    it("should identify Spamhaus PBL", () => {
-      const result = identifyBlocklist("Listed in PBL");
-      assert.strictEqual(result.name, "Spamhaus PBL");
-    });
-  });
-
-  describe("getAction", () => {
-    it("should return remove for user_unknown", () => {
-      assert.strictEqual(getAction("user_unknown"), "remove");
-    });
-
-    it("should return remove for invalid_address", () => {
-      assert.strictEqual(getAction("invalid_address"), "remove");
-    });
-
-    it("should return remove for mailbox_disabled", () => {
-      assert.strictEqual(getAction("mailbox_disabled"), "remove");
-    });
-
-    it("should return retry for greylisting", () => {
-      assert.strictEqual(getAction("greylisting"), "retry");
-    });
-
-    it("should return retry for rate_limited", () => {
-      assert.strictEqual(getAction("rate_limited"), "retry");
-    });
-
-    it("should return retry for server_error", () => {
-      assert.strictEqual(getAction("server_error"), "retry");
-    });
-
-    it("should return retry for mailbox_full", () => {
-      assert.strictEqual(getAction("mailbox_full"), "retry");
-    });
-
-    it("should return retry_different_ip for ip_blacklisted", () => {
-      assert.strictEqual(getAction("ip_blacklisted"), "retry_different_ip");
-    });
-
-    it("should return retry_different_ip for geo_blocked", () => {
-      assert.strictEqual(getAction("geo_blocked"), "retry_different_ip");
-    });
-
-    it("should return fix_configuration for auth_failure", () => {
-      assert.strictEqual(getAction("auth_failure"), "fix_configuration");
-    });
-
-    it("should return fix_configuration for domain_blacklisted", () => {
-      assert.strictEqual(getAction("domain_blacklisted"), "fix_configuration");
-    });
-
-    it("should return fix_configuration for relay_denied", () => {
-      assert.strictEqual(getAction("relay_denied"), "fix_configuration");
-    });
-
-    it("should return review for spam_blocked", () => {
-      assert.strictEqual(getAction("spam_blocked"), "review");
-    });
-
-    it("should return review for policy_blocked", () => {
-      assert.strictEqual(getAction("policy_blocked"), "review");
-    });
-
-    it("should return remove_content for virus_detected", () => {
-      assert.strictEqual(getAction("virus_detected"), "remove_content");
-    });
-
-    it("should return review for unknown category", () => {
-      assert.strictEqual(getAction("unknown"), "review");
-    });
-
-    it("should return review for undefined category", () => {
-      assert.strictEqual(getAction("nonexistent"), "review");
-    });
-  });
-
-  describe("getTextBasedFallback", () => {
-    it("should detect user unknown patterns", () => {
-      assert.strictEqual(
-        getTextBasedFallback("This user doesn't have a gmail account"),
-        "user_unknown",
-      );
-      assert.strictEqual(
-        getTextBasedFallback("No such user here"),
-        "user_unknown",
-      );
-      assert.strictEqual(
-        getTextBasedFallback("Mailbox not found"),
-        "user_unknown",
-      );
-    });
-
-    it("should detect auth failure patterns", () => {
-      assert.strictEqual(
-        getTextBasedFallback("The sender is unauthenticated"),
-        "auth_failure",
-      );
-    });
-
-    it("should return null for unmatched patterns", () => {
-      assert.strictEqual(getTextBasedFallback("Some random error"), null);
-    });
-  });
-
-  describe("getCodeBasedFallback", () => {
-    it("should use text pattern first", () => {
-      assert.strictEqual(
-        getCodeBasedFallback("550 No such user here"),
-        "user_unknown",
-      );
-    });
-
-    it("should fall back to extended SMTP code", () => {
-      assert.strictEqual(
-        getCodeBasedFallback("550 5.2.2 Mailbox quota exceeded"),
-        "mailbox_full",
-      );
-    });
-
-    it("should fall back to main SMTP code", () => {
-      assert.strictEqual(
-        getCodeBasedFallback("552 Message too large"),
-        "mailbox_full",
-      );
-    });
-
-    it("should return null when no fallback matches", () => {
-      assert.strictEqual(getCodeBasedFallback("Something went wrong"), null);
-    });
-  });
-
-  describe("SMTP_CODE_MAP coverage", () => {
-    it("should have mappings for common extended codes", () => {
-      assert.strictEqual(SMTP_CODE_MAP["5.1.1"], "user_unknown");
-      assert.strictEqual(SMTP_CODE_MAP["5.2.2"], "mailbox_full");
-      assert.strictEqual(SMTP_CODE_MAP["5.7.1"], "policy_blocked");
-      assert.strictEqual(SMTP_CODE_MAP["4.7.0"], "rate_limited");
-    });
-  });
-
-  describe("SMTP_MAIN_CODE_MAP coverage", () => {
-    it("should have mappings for common main codes", () => {
-      assert.strictEqual(SMTP_MAIN_CODE_MAP[550], "user_unknown");
-      assert.strictEqual(SMTP_MAIN_CODE_MAP[552], "mailbox_full");
-      assert.strictEqual(SMTP_MAIN_CODE_MAP[421], "greylisting");
-      assert.strictEqual(SMTP_MAIN_CODE_MAP[554], "policy_blocked");
-    });
-  });
-
-  describe("ACTION_MAP coverage", () => {
-    it("should have actions for all bounce categories", () => {
-      const expectedActions = [
-        "remove",
-        "retry",
-        "retry_different_ip",
-        "fix_configuration",
-        "review",
-        "remove_content",
-      ];
-      const actions = Object.values(ACTION_MAP);
-      for (const action of expectedActions) {
-        assert.ok(actions.includes(action), `Missing action: ${action}`);
-      }
-    });
-
-    it("should have mappings for all 16 categories", () => {
-      const expectedCategories = [
-        "user_unknown",
-        "invalid_address",
-        "mailbox_disabled",
-        "greylisting",
-        "rate_limited",
-        "server_error",
-        "mailbox_full",
-        "ip_blacklisted",
-        "domain_blacklisted",
-        "auth_failure",
-        "spam_blocked",
-        "policy_blocked",
-        "virus_detected",
-        "geo_blocked",
-        "relay_denied",
-        "unknown",
-      ];
-      for (const category of expectedCategories) {
-        assert.ok(
-          ACTION_MAP[category] !== undefined,
-          `Missing action for: ${category}`,
-        );
-      }
-    });
-  });
-
-  describe("BLOCKLIST_PATTERNS", () => {
-    it("should be an array", () => {
-      assert.ok(Array.isArray(BLOCKLIST_PATTERNS));
-    });
-
-    it("should have pattern, name, and type for each entry", () => {
-      for (const entry of BLOCKLIST_PATTERNS) {
-        assert.ok(entry.pattern instanceof RegExp, "pattern should be RegExp");
-        assert.ok(typeof entry.name === "string", "name should be string");
-        assert.ok(
-          ["ip", "domain", "uri"].includes(entry.type),
-          "type should be ip, domain, or uri",
-        );
-      }
-    });
-
-    it("should include major blocklist providers", () => {
-      const names = BLOCKLIST_PATTERNS.map((p) => p.name);
-      assert.ok(names.includes("Spamhaus"), "Should include Spamhaus");
-      assert.ok(names.includes("Barracuda"), "Should include Barracuda");
-      assert.ok(names.includes("SpamCop"), "Should include SpamCop");
-      assert.ok(names.includes("SORBS"), "Should include SORBS");
-    });
-  });
-
-  describe("CODE_FALLBACK_THRESHOLD", () => {
-    it("should be a number between 0 and 1", () => {
-      assert.ok(typeof CODE_FALLBACK_THRESHOLD === "number");
-      assert.ok(CODE_FALLBACK_THRESHOLD >= 0);
-      assert.ok(CODE_FALLBACK_THRESHOLD <= 1);
-    });
-
-    it("should be 0.5 (50% confidence threshold)", () => {
-      assert.strictEqual(CODE_FALLBACK_THRESHOLD, 0.5);
-    });
-  });
-
-  describe("extractRetryTiming edge cases", () => {
-    it("should handle too many requests pattern", () => {
-      const result = extractRetryTiming("Too many requests, wait 60 seconds");
-      assert.strictEqual(result, 60);
-    });
-
-    it("should handle come back later pattern", () => {
-      const result = extractRetryTiming("Come back in 10 minutes");
-      assert.strictEqual(result, 600);
-    });
-
-    it("should handle after pattern", () => {
-      const result = extractRetryTiming("Try after 30 seconds");
-      assert.strictEqual(result, 30);
-    });
-
-    it("should reject unreasonably large values", () => {
-      // Values over 86400 seconds (24 hours) should be rejected
-      const result = extractRetryTiming("Wait 100000 seconds");
-      assert.strictEqual(result, null);
-    });
-
-    it("should handle plural units", () => {
-      assert.strictEqual(extractRetryTiming("Wait 2 hours"), 7200);
-      assert.strictEqual(extractRetryTiming("Wait 30 seconds"), 30);
-      assert.strictEqual(extractRetryTiming("Wait 5 minutes"), 300);
-    });
-  });
 });
 
-describe("Classifier", () => {
-  before(async () => {
-    await initialize();
-  });
-
-  after(() => {
-    reset();
-  });
-
-  describe("initialize and state", () => {
-    it("should be ready after initialization", () => {
-      assert.strictEqual(isReady(), true);
-    });
-  });
-
-  describe("getLabels", () => {
-    it("should return 16 labels", async () => {
-      const labels = await getLabels();
-      assert.strictEqual(labels.length, 16);
+describe('Classifier', () => {
+    before(async () => {
+        await initialize();
     });
 
-    it("should include all expected labels", async () => {
-      const labels = await getLabels();
-      const expectedLabels = [
-        "auth_failure",
-        "domain_blacklisted",
-        "geo_blocked",
-        "greylisting",
-        "invalid_address",
-        "ip_blacklisted",
-        "mailbox_disabled",
-        "mailbox_full",
-        "policy_blocked",
-        "rate_limited",
-        "relay_denied",
-        "server_error",
-        "spam_blocked",
-        "unknown",
-        "user_unknown",
-        "virus_detected",
-      ];
-      for (const label of expectedLabels) {
-        assert.ok(labels.includes(label), `Missing label: ${label}`);
-      }
-    });
-  });
-
-  describe("classify", () => {
-    it("should throw error for non-string input", async () => {
-      await assert.rejects(
-        async () => classify(null),
-        /must be a non-empty string/,
-      );
-      await assert.rejects(
-        async () => classify(123),
-        /must be a string, got number/,
-      );
-      await assert.rejects(
-        async () => classify(""),
-        /must not be empty or whitespace-only/,
-      );
+    after(() => {
+        reset();
     });
 
-    it("should return required fields", async () => {
-      const result = await classify("550 5.1.1 User unknown");
-      assert.ok(result.label, "Should have label");
-      assert.ok(
-        typeof result.confidence === "number",
-        "Should have confidence",
-      );
-      assert.ok(result.action, "Should have action");
-      assert.ok(result.scores, "Should have scores");
+    describe('initialize and state', () => {
+        it('should be ready after initialization', () => {
+            assert.strictEqual(isReady(), true);
+        });
     });
 
-    it("should classify user_unknown bounces", async () => {
-      const messages = [
-        "550 5.1.1 The email account that you tried to reach does not exist",
-        "550 User unknown",
-        "550 5.1.1 <test@example.com>: Recipient address rejected: User unknown",
-        "550 No such user - psmtp",
-      ];
-      for (const msg of messages) {
+    describe('getLabels', () => {
+        it('should return 16 labels', async () => {
+            const labels = await getLabels();
+            assert.strictEqual(labels.length, 16);
+        });
+
+        it('should include all expected labels', async () => {
+            const labels = await getLabels();
+            const expectedLabels = [
+                'auth_failure',
+                'domain_blacklisted',
+                'geo_blocked',
+                'greylisting',
+                'invalid_address',
+                'ip_blacklisted',
+                'mailbox_disabled',
+                'mailbox_full',
+                'policy_blocked',
+                'rate_limited',
+                'relay_denied',
+                'server_error',
+                'spam_blocked',
+                'unknown',
+                'user_unknown',
+                'virus_detected'
+            ];
+            for (const label of expectedLabels) {
+                assert.ok(labels.includes(label), `Missing label: ${label}`);
+            }
+        });
+    });
+
+    describe('classify', () => {
+        it('should throw error for non-string input', async () => {
+            await assert.rejects(async () => classify(null), /must be a non-empty string/);
+            await assert.rejects(async () => classify(123), /must be a string, got number/);
+            await assert.rejects(async () => classify(''), /must not be empty or whitespace-only/);
+        });
+
+        it('should return required fields', async () => {
+            const result = await classify('550 5.1.1 User unknown');
+            assert.ok(result.label, 'Should have label');
+            assert.ok(typeof result.confidence === 'number', 'Should have confidence');
+            assert.ok(result.action, 'Should have action');
+            assert.ok(result.scores, 'Should have scores');
+        });
+
+        it('should classify user_unknown bounces', async () => {
+            const messages = [
+                '550 5.1.1 The email account that you tried to reach does not exist',
+                '550 User unknown',
+                '550 5.1.1 <test@example.com>: Recipient address rejected: User unknown',
+                '550 No such user - psmtp'
+            ];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.strictEqual(result.label, 'user_unknown', `Expected user_unknown for: ${msg}`);
+            }
+        });
+
+        it('should classify mailbox_full bounces', async () => {
+            const messages = ['552 5.2.2 Mailbox full', '552 5.2.2 Over quota', '452 4.2.2 Mailbox quota exceeded'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.strictEqual(result.label, 'mailbox_full', `Expected mailbox_full for: ${msg}`);
+            }
+        });
+
+        it('should classify greylisting bounces', async () => {
+            const messages = ['421 4.7.0 Try again later', '450 4.2.0 Greylisted, please retry in 5 minutes', '421 Please try again later'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.ok(['greylisting', 'rate_limited'].includes(result.label), `Expected greylisting/rate_limited for: ${msg}, got: ${result.label}`);
+            }
+        });
+
+        it('should classify ip_blacklisted bounces', async () => {
+            const messages = [
+                '550 IP blocked by zen.spamhaus.org',
+                '550 Your IP has been blacklisted',
+                '550 Blocked - see https://www.spamhaus.org/query/bl?ip=1.2.3.4'
+            ];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.strictEqual(result.label, 'ip_blacklisted', `Expected ip_blacklisted for: ${msg}`);
+            }
+        });
+
+        it('should identify specific blocklist in ip_blacklisted bounce', async () => {
+            const result = await classify('550 IP blocked by zen.spamhaus.org');
+            assert.ok(result.blocklist, 'Should identify blocklist');
+        });
+
+        it('should classify auth_failure bounces', async () => {
+            const messages = ['550 5.7.23 SPF validation failed', '550 5.7.1 DMARC policy rejection', '550 SPF: sender is unauthenticated'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                // DMARC/SPF can be classified as auth_failure or policy_blocked
+                assert.ok(
+                    ['auth_failure', 'policy_blocked'].includes(result.label),
+                    `Expected auth_failure or policy_blocked for: ${msg}, got: ${result.label}`
+                );
+            }
+        });
+
+        it('should classify server_error bounces', async () => {
+            const messages = ['451 4.3.0 Temporary system failure', '451 Internal server error', '421 Service temporarily unavailable'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.ok(['server_error', 'greylisting'].includes(result.label), `Expected server_error/greylisting for: ${msg}, got: ${result.label}`);
+            }
+        });
+
+        it('should classify spam_blocked bounces', async () => {
+            const messages = ['550 Message rejected as spam', '550 Your message was detected as spam', '571 Message refused, spam detected'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.ok(['spam_blocked', 'policy_blocked'].includes(result.label), `Expected spam_blocked/policy_blocked for: ${msg}, got: ${result.label}`);
+            }
+        });
+
+        it('should classify policy_blocked bounces', async () => {
+            const messages = ['550 5.7.1 Message rejected due to content policy', '554 Message rejected due to local policy'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                // Model may classify content policy as spam_blocked or policy_blocked
+                assert.ok(
+                    ['policy_blocked', 'spam_blocked'].includes(result.label),
+                    `Expected policy_blocked or spam_blocked for: ${msg}, got: ${result.label}`
+                );
+            }
+        });
+
+        it('should classify invalid_address bounces', async () => {
+            const messages = ['550 5.1.2 Bad destination mailbox address', '553 5.1.3 Invalid address format', '501 Malformed address'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.strictEqual(result.label, 'invalid_address', `Expected invalid_address for: ${msg}`);
+            }
+        });
+
+        it('should classify relay_denied bounces', async () => {
+            const messages = ['550 5.7.2 Relay access denied', '451 relay not permitted!'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.strictEqual(result.label, 'relay_denied', `Expected relay_denied for: ${msg}`);
+            }
+        });
+
+        it('should classify 450 4.7.1 relay message reasonably', async () => {
+            // Ambiguous: 4.7.1 maps to rate_limited via SMTP code, but model
+            // may classify as relay_denied based on message text. Both are valid.
+            const result = await classify('450 4.7.1 We do not relay for example.com');
+            assert.ok(['rate_limited', 'relay_denied'].includes(result.label), `Expected rate_limited or relay_denied, got ${result.label}`);
+        });
+
+        it('should classify 551 not local reasonably', async () => {
+            // Ambiguous: different model versions may classify as user_unknown,
+            // invalid_address, or relay_denied. All are plausible for "not local".
+            const result = await classify('551 User not local; please try forwarding');
+            assert.ok(
+                ['user_unknown', 'invalid_address', 'relay_denied'].includes(result.label),
+                `Expected user_unknown, invalid_address, or relay_denied, got ${result.label}`
+            );
+        });
+
+        it('should classify domain_blacklisted bounces', async () => {
+            const messages = ['550 Your domain has been blacklisted', '550 Domain blocked due to spam complaints'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                // Model may classify these as various blocklist-related categories
+                assert.ok(
+                    ['domain_blacklisted', 'ip_blacklisted', 'spam_blocked', 'user_unknown'].includes(result.label),
+                    `Expected blocklist-related category for: ${msg}, got: ${result.label}`
+                );
+            }
+        });
+
+        it('should classify rate_limited bounces', async () => {
+            const messages = ['450 4.7.1 Too many connections from your IP', '421 4.7.0 Connection rate limit exceeded', '452 Too many recipients'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.ok(
+                    ['rate_limited', 'greylisting', 'server_error'].includes(result.label),
+                    `Expected rate_limited/greylisting/server_error for: ${msg}, got: ${result.label}`
+                );
+            }
+        });
+
+        it('should classify mailbox_disabled bounces', async () => {
+            const messages = ['550 5.2.1 Mailbox disabled', '550 Account has been disabled', '550 This mailbox is disabled and not accepting messages'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.ok(
+                    ['mailbox_disabled', 'user_unknown'].includes(result.label),
+                    `Expected mailbox_disabled/user_unknown for: ${msg}, got: ${result.label}`
+                );
+            }
+        });
+
+        it('should classify virus_detected bounces', async () => {
+            const messages = ['550 5.7.0 Virus detected in message', '550 Malware found in attachment'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                // Model may need more training data for virus detection
+                assert.ok(result.label, `Should return a label for: ${msg}`);
+                assert.ok(result.action, 'Should return an action');
+            }
+        });
+
+        it('should classify geo_blocked bounces', async () => {
+            const messages = ['550 Connections from your country are not allowed', '550 Your region is blocked'];
+            for (const msg of messages) {
+                const result = await classify(msg);
+                // Model may classify geographic blocks various ways
+                assert.ok(result.label, `Should return a label for: ${msg}`);
+                assert.ok(result.action, 'Should return an action');
+            }
+        });
+
+        it('should handle unknown/ambiguous bounces', async () => {
+            const result = await classify('Error processing message');
+            assert.ok(result.label, 'Should return some label');
+            assert.ok(result.action, 'Should return an action');
+        });
+
+        it('should extract retry timing when present', async () => {
+            const result = await classify('450 Greylisted, try again in 300 seconds');
+            assert.strictEqual(result.retryAfter, 300);
+        });
+
+        it('should report a blocklist only for blocklist-related labels', async () => {
+            // wording-level matches: the generic "blocklist" pattern, or a vendor
+            // name, where the recipient is the problem
+            for (const msg of [
+                '550 5.1.1 User unknown, see our blocklist policy',
+                '550 Invalid Recipient - https://community.mimecast.com/docs/DOC-1369#550',
+                '550 5.1.1 User unknown. Protected by Barracuda Networks'
+            ]) {
+                const result = await classify(msg);
+                assert.strictEqual(result.label, 'user_unknown', msg);
+                assert.strictEqual(result.blocklist, undefined, msg);
+            }
+
+            const listed = await classify('554 5.7.1 Service unavailable; Client host [192.0.2.1] blocked using b.barracudacentral.org');
+            assert.strictEqual(listed.label, 'ip_blacklisted');
+            assert.deepStrictEqual(listed.blocklist, {
+                name: 'Barracuda',
+                type: 'ip',
+                host: true
+            });
+        });
+
+        it('should report a hostname-level blocklist whatever the label', async () => {
+            const result = await classify('b.barracudacentral.org');
+            assert.strictEqual(result.label, 'unknown');
+            assert.deepStrictEqual(result.blocklist, {
+                name: 'Barracuda',
+                type: 'ip',
+                host: true
+            });
+        });
+
+        it('should identify blocklist when present', async () => {
+            const result = await classify('550 Blocked by zen.spamhaus.org');
+            assert.ok(result.blocklist);
+            // May return lists array when multiple patterns match
+            const name = result.blocklist.name || (result.blocklist.lists && result.blocklist.lists[0]?.name);
+            assert.ok(name === 'Spamhaus ZEN' || name === 'Spamhaus', `Expected Spamhaus blocklist, got: ${name}`);
+        });
+
+        it('should set usedFallback when confidence is low', async () => {
+            const result = await classify('550 5.1.1 test');
+            if (result.confidence < 0.5) {
+                assert.strictEqual(result.usedFallback, true);
+            }
+        });
+    });
+});
+
+describe('Reset functionality', () => {
+    it('should reset classifier state', async () => {
+        await initialize();
+        assert.strictEqual(isReady(), true);
+
+        reset();
+        assert.strictEqual(isReady(), false);
+    });
+
+    it('should allow re-initialization after reset', async () => {
+        reset();
+        assert.strictEqual(isReady(), false);
+
+        await initialize();
+        assert.strictEqual(isReady(), true);
+
+        const result = await classify('550 User unknown');
+        assert.ok(result.label);
+
+        reset();
+    });
+});
+
+describe('Edge cases', () => {
+    before(async () => {
+        await initialize();
+    });
+
+    after(() => {
+        reset();
+    });
+
+    describe('Long messages', () => {
+        it('should handle very long messages', async () => {
+            // Create a message longer than MAX_LENGTH (100 tokens)
+            const longMessage = '550 5.1.1 ' + 'User unknown error message '.repeat(50);
+            const result = await classify(longMessage);
+            assert.ok(result.label, 'Should handle long messages');
+            assert.ok(result.confidence >= 0 && result.confidence <= 1);
+        });
+
+        it('should handle messages with many words', async () => {
+            const manyWords = '550 ' + 'word '.repeat(200) + 'user unknown';
+            const result = await classify(manyWords);
+            assert.ok(result.label, 'Should handle many words');
+        });
+    });
+
+    describe('Special characters', () => {
+        it('should handle unicode characters', async () => {
+            const result = await classify('550 Usuario desconocido');
+            assert.ok(result.label, 'Should handle Spanish text');
+        });
+
+        it('should handle email addresses in messages', async () => {
+            const result = await classify('550 5.1.1 <test@example.com>: Recipient address rejected');
+            assert.ok(result.label);
+        });
+
+        it('should handle URLs in messages', async () => {
+            const result = await classify('550 Blocked - see https://www.example.com/help for info');
+            assert.ok(result.label);
+        });
+
+        it('should handle newlines and tabs', async () => {
+            const result = await classify('550 5.1.1 User unknown\n\tPlease check');
+            assert.ok(result.label);
+        });
+
+        it('should handle empty-ish but valid messages', async () => {
+            const result = await classify('   550   ');
+            assert.ok(result.label);
+        });
+    });
+
+    describe('Numeric edge cases', () => {
+        it('should handle messages with only numbers', async () => {
+            const result = await classify('550 5.1.1 123456789');
+            assert.ok(result.label);
+        });
+
+        it('should handle IP addresses in messages', async () => {
+            const result = await classify('550 Connection from 192.168.1.1 rejected');
+            assert.ok(result.label);
+        });
+    });
+
+    describe('Multiple classifications', () => {
+        it('should handle multiple sequential classifications', async () => {
+            const messages = [
+                '550 5.1.1 User unknown',
+                '552 5.2.2 Mailbox full',
+                '421 Try again later',
+                '550 Blocked by spamhaus.org',
+                '550 5.7.1 SPF validation failed'
+            ];
+
+            for (const msg of messages) {
+                const result = await classify(msg);
+                assert.ok(result.label, `Should classify: ${msg}`);
+            }
+        });
+    });
+});
+
+describe('Initialization edge cases', () => {
+    afterEach(() => {
+        reset();
+    });
+
+    it('should handle multiple sequential initialize calls', async () => {
+        await initialize();
+        await initialize(); // Should be idempotent
+        await initialize();
+        assert.strictEqual(isReady(), true);
+    });
+
+    it('should handle classify auto-initializing', async () => {
+        reset();
+        assert.strictEqual(isReady(), false);
+
+        // classify should auto-initialize
+        const result = await classify('550 User unknown');
+        assert.ok(result.label);
+        assert.strictEqual(isReady(), true);
+    });
+
+    it('should handle getLabels auto-initializing', async () => {
+        reset();
+        assert.strictEqual(isReady(), false);
+
+        const labels = await getLabels();
+        assert.strictEqual(labels.length, 16);
+        assert.strictEqual(isReady(), true);
+    });
+});
+
+describe('Score validation', () => {
+    before(async () => {
+        await initialize();
+    });
+
+    after(() => {
+        reset();
+    });
+
+    it('should return scores for all 16 labels', async () => {
+        const result = await classify('550 User unknown');
+        const scoreKeys = Object.keys(result.scores);
+        assert.strictEqual(scoreKeys.length, 16);
+    });
+
+    it('should have scores that sum approximately to 1', async () => {
+        const result = await classify('550 User unknown');
+        const sum = Object.values(result.scores).reduce((a, b) => a + b, 0);
+        // Softmax output should sum to approximately 1
+        assert.ok(sum > 0.99 && sum < 1.01, `Scores sum to ${sum}, expected ~1`);
+    });
+
+    it('should report the score of the returned label as confidence', async () => {
+        const result = await classify('550 User unknown');
+        assert.strictEqual(result.confidence, result.scores[result.label]);
+    });
+
+    it('should report the top score as confidence when the model label stands', async () => {
+        const result = await classify('452 4.2.2 The email account is over quota');
+        assert.strictEqual(result.modelLabel, undefined);
+        const maxScore = Math.max(...Object.values(result.scores));
+        assert.strictEqual(result.confidence, maxScore);
+    });
+
+    it('should have all scores between 0 and 1', async () => {
+        const result = await classify('550 User unknown');
+        for (const [label, score] of Object.entries(result.scores)) {
+            assert.ok(score >= 0 && score <= 1, `Score for ${label} is ${score}, expected 0-1`);
+        }
+    });
+});
+
+describe('getModelInfo', () => {
+    afterEach(() => {
+        reset();
+    });
+
+    it('should return an object with all nulls before initialization', () => {
+        reset();
+        const info = getModelInfo();
+        assert.ok(info && typeof info === 'object', 'expected object');
+        assert.strictEqual(info.initialized, false);
+        assert.strictEqual(info.modelHash, null);
+        assert.strictEqual(info.trainedAt, null);
+        assert.strictEqual(info.trainingSamples, null);
+        assert.strictEqual(info.validationAccuracy, null);
+    });
+
+    it('should return an object with the expected shape after init', async () => {
+        await initialize();
+        const info = getModelInfo();
+        assert.ok(info && typeof info === 'object', 'expected object');
+        assert.strictEqual(info.initialized, true);
+        for (const key of ['modelHash', 'trainedAt', 'trainingSamples', 'validationAccuracy']) {
+            assert.ok(key in info, `missing key: ${key}`);
+        }
+    });
+
+    it('should preserve falsy-but-valid config values (0, empty string)', async () => {
+        // Regression: prior implementation used `||`, coercing these to null.
+        const tmp = makeTmpModel({
+            model_hash: '',
+            trained_at: '1970-01-01T00:00:00Z',
+            training_samples: 0,
+            validation_accuracy: 0
+        });
+        try {
+            await initialize({ modelPath: tmp.path });
+            const info = getModelInfo();
+            assert.strictEqual(info.modelHash, '');
+            assert.strictEqual(info.trainingSamples, 0);
+            assert.strictEqual(info.validationAccuracy, 0);
+            assert.strictEqual(info.trainedAt, '1970-01-01T00:00:00Z');
+        } finally {
+            tmp.cleanup();
+        }
+    });
+
+    it('should fill all fields with null when config.json is missing', async () => {
+        // makeTmpModel writes a config.json by default; here we explicitly
+        // create one with an empty object, equivalent to "no metadata supplied".
+        const tmp = makeTmpModel({});
+        try {
+            await initialize({ modelPath: tmp.path });
+            const info = getModelInfo();
+            assert.strictEqual(info.modelHash, null);
+            assert.strictEqual(info.trainedAt, null);
+            assert.strictEqual(info.trainingSamples, null);
+            assert.strictEqual(info.validationAccuracy, null);
+        } finally {
+            tmp.cleanup();
+        }
+    });
+});
+
+describe('reload', () => {
+    afterEach(() => {
+        reset();
+    });
+
+    it('should re-initialize with the previously used path when called with no args', async () => {
+        await initialize();
+        assert.strictEqual(isReady(), true);
+        await reload();
+        assert.strictEqual(isReady(), true);
+        // Classification still works after reload.
+        const result = await classify('550 5.1.1 User unknown');
+        assert.ok(result.label);
+    });
+
+    it('should switch to a different model path when one is supplied', async () => {
+        await initialize();
+        const tmp = makeTmpModel({
+            model_hash: 'tmp-hash-deadbeef',
+            trained_at: '2099-01-01T00:00:00Z',
+            training_samples: 42,
+            validation_accuracy: 0.5
+        });
+        try {
+            await reload({ modelPath: tmp.path });
+            const info = getModelInfo();
+            assert.strictEqual(info.modelHash, 'tmp-hash-deadbeef');
+            assert.strictEqual(info.trainingSamples, 42);
+        } finally {
+            tmp.cleanup();
+        }
+    });
+
+    it('should wait for in-flight classify() calls before swapping', async () => {
+        await initialize();
+        const messages = Array.from({ length: 20 }, (_, i) => `550 5.1.1 User ${i} unknown`);
+        const promises = messages.map(m => classify(m));
+        // Fire reload while the above are still scheduled; all must resolve.
+        await reload();
+        const results = await Promise.all(promises);
+        assert.strictEqual(results.length, messages.length);
+        for (const r of results) assert.ok(r.label);
+        assert.strictEqual(isReady(), true);
+    });
+});
+
+describe('classifyBatch', () => {
+    before(async () => {
+        await initialize();
+    });
+
+    after(() => {
+        reset();
+    });
+
+    it('should classify a batch of messages', async () => {
+        const results = await classifyBatch(['550 5.1.1 User unknown', '552 5.2.2 Over quota', '421 4.7.0 Try again later']);
+        assert.strictEqual(results.length, 3);
+        for (const r of results) {
+            assert.ok(r.label);
+            assert.ok(typeof r.confidence === 'number');
+            assert.ok(r.action);
+        }
+    });
+
+    it('should return empty array for empty input', async () => {
+        const results = await classifyBatch([]);
+        assert.deepStrictEqual(results, []);
+    });
+
+    it('should throw on non-array input', async () => {
+        await assert.rejects(async () => classifyBatch('not an array'), /expected an array/);
+        await assert.rejects(async () => classifyBatch(null), /expected an array/);
+    });
+
+    it('should surface per-item error with .index', async () => {
+        let caught;
+        try {
+            await classifyBatch(['valid message', '', 'also valid']);
+        } catch (err) {
+            caught = err;
+        }
+        assert.ok(caught, 'expected error');
+        assert.strictEqual(caught.index, 1);
+        assert.match(caught.message, /classifyBatch\[1\]/);
+    });
+});
+
+describe('registerTextFallback / clearTextFallbacks', () => {
+    before(async () => {
+        await initialize();
+    });
+
+    afterEach(() => {
+        clearTextFallbacks();
+    });
+
+    after(() => {
+        reset();
+    });
+
+    it('should let a user pattern override built-in classification', async () => {
+        const msg = 'XYZZY-PROVIDER-42: bounce for unknown reason';
+        registerTextFallback({
+            pattern: /XYZZY-PROVIDER-\d+/,
+            label: 'spam_blocked'
+        });
         const result = await classify(msg);
-        assert.strictEqual(
-          result.label,
-          "user_unknown",
-          `Expected user_unknown for: ${msg}`,
-        );
-      }
-    });
-
-    it("should classify mailbox_full bounces", async () => {
-      const messages = [
-        "552 5.2.2 Mailbox full",
-        "552 5.2.2 Over quota",
-        "452 4.2.2 Mailbox quota exceeded",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.strictEqual(
-          result.label,
-          "mailbox_full",
-          `Expected mailbox_full for: ${msg}`,
-        );
-      }
-    });
-
-    it("should classify greylisting bounces", async () => {
-      const messages = [
-        "421 4.7.0 Try again later",
-        "450 4.2.0 Greylisted, please retry in 5 minutes",
-        "421 Please try again later",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.ok(
-          ["greylisting", "rate_limited"].includes(result.label),
-          `Expected greylisting/rate_limited for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify ip_blacklisted bounces", async () => {
-      const messages = [
-        "550 IP blocked by zen.spamhaus.org",
-        "550 Your IP has been blacklisted",
-        "550 Blocked - see https://www.spamhaus.org/query/bl?ip=1.2.3.4",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.strictEqual(
-          result.label,
-          "ip_blacklisted",
-          `Expected ip_blacklisted for: ${msg}`,
-        );
-      }
-    });
-
-    it("should identify specific blocklist in ip_blacklisted bounce", async () => {
-      const result = await classify("550 IP blocked by zen.spamhaus.org");
-      assert.ok(result.blocklist, "Should identify blocklist");
-    });
-
-    it("should classify auth_failure bounces", async () => {
-      const messages = [
-        "550 5.7.23 SPF validation failed",
-        "550 5.7.1 DMARC policy rejection",
-        "550 SPF: sender is unauthenticated",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        // DMARC/SPF can be classified as auth_failure or policy_blocked
-        assert.ok(
-          ["auth_failure", "policy_blocked"].includes(result.label),
-          `Expected auth_failure or policy_blocked for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify server_error bounces", async () => {
-      const messages = [
-        "451 4.3.0 Temporary system failure",
-        "451 Internal server error",
-        "421 Service temporarily unavailable",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.ok(
-          ["server_error", "greylisting"].includes(result.label),
-          `Expected server_error/greylisting for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify spam_blocked bounces", async () => {
-      const messages = [
-        "550 Message rejected as spam",
-        "550 Your message was detected as spam",
-        "571 Message refused, spam detected",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.ok(
-          ["spam_blocked", "policy_blocked"].includes(result.label),
-          `Expected spam_blocked/policy_blocked for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify policy_blocked bounces", async () => {
-      const messages = [
-        "550 5.7.1 Message rejected due to content policy",
-        "554 Message rejected due to local policy",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        // Model may classify content policy as spam_blocked or policy_blocked
-        assert.ok(
-          ["policy_blocked", "spam_blocked"].includes(result.label),
-          `Expected policy_blocked or spam_blocked for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify invalid_address bounces", async () => {
-      const messages = [
-        "550 5.1.2 Bad destination mailbox address",
-        "553 5.1.3 Invalid address format",
-        "501 Malformed address",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.strictEqual(
-          result.label,
-          "invalid_address",
-          `Expected invalid_address for: ${msg}`,
-        );
-      }
-    });
-
-    it("should classify relay_denied bounces", async () => {
-      const messages = [
-        "550 5.7.2 Relay access denied",
-        "451 relay not permitted!",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.strictEqual(
-          result.label,
-          "relay_denied",
-          `Expected relay_denied for: ${msg}`,
-        );
-      }
-    });
-
-    it("should classify 450 4.7.1 relay message reasonably", async () => {
-      // Ambiguous: 4.7.1 maps to rate_limited via SMTP code, but model
-      // may classify as relay_denied based on message text. Both are valid.
-      const result = await classify(
-        "450 4.7.1 We do not relay for example.com",
-      );
-      assert.ok(
-        ["rate_limited", "relay_denied"].includes(result.label),
-        `Expected rate_limited or relay_denied, got ${result.label}`,
-      );
-    });
-
-    it("should classify 551 not local reasonably", async () => {
-      // Ambiguous: different model versions may classify as user_unknown,
-      // invalid_address, or relay_denied. All are plausible for "not local".
-      const result = await classify(
-        "551 User not local; please try forwarding",
-      );
-      assert.ok(
-        ["user_unknown", "invalid_address", "relay_denied"].includes(
-          result.label,
-        ),
-        `Expected user_unknown, invalid_address, or relay_denied, got ${result.label}`,
-      );
-    });
-
-    it("should classify domain_blacklisted bounces", async () => {
-      const messages = [
-        "550 Your domain has been blacklisted",
-        "550 Domain blocked due to spam complaints",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        // Model may classify these as various blocklist-related categories
-        assert.ok(
-          [
-            "domain_blacklisted",
-            "ip_blacklisted",
-            "spam_blocked",
-            "user_unknown",
-          ].includes(result.label),
-          `Expected blocklist-related category for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify rate_limited bounces", async () => {
-      const messages = [
-        "450 4.7.1 Too many connections from your IP",
-        "421 4.7.0 Connection rate limit exceeded",
-        "452 Too many recipients",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.ok(
-          ["rate_limited", "greylisting", "server_error"].includes(
-            result.label,
-          ),
-          `Expected rate_limited/greylisting/server_error for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify mailbox_disabled bounces", async () => {
-      const messages = [
-        "550 5.2.1 Mailbox disabled",
-        "550 Account has been disabled",
-        "550 This mailbox is disabled and not accepting messages",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        assert.ok(
-          ["mailbox_disabled", "user_unknown"].includes(result.label),
-          `Expected mailbox_disabled/user_unknown for: ${msg}, got: ${result.label}`,
-        );
-      }
-    });
-
-    it("should classify virus_detected bounces", async () => {
-      const messages = [
-        "550 5.7.0 Virus detected in message",
-        "550 Malware found in attachment",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        // Model may need more training data for virus detection
-        assert.ok(result.label, `Should return a label for: ${msg}`);
-        assert.ok(result.action, "Should return an action");
-      }
-    });
-
-    it("should classify geo_blocked bounces", async () => {
-      const messages = [
-        "550 Connections from your country are not allowed",
-        "550 Your region is blocked",
-      ];
-      for (const msg of messages) {
-        const result = await classify(msg);
-        // Model may classify geographic blocks various ways
-        assert.ok(result.label, `Should return a label for: ${msg}`);
-        assert.ok(result.action, "Should return an action");
-      }
-    });
-
-    it("should handle unknown/ambiguous bounces", async () => {
-      const result = await classify("Error processing message");
-      assert.ok(result.label, "Should return some label");
-      assert.ok(result.action, "Should return an action");
-    });
-
-    it("should extract retry timing when present", async () => {
-      const result = await classify("450 Greylisted, try again in 300 seconds");
-      assert.strictEqual(result.retryAfter, 300);
-    });
-
-    it("should report a blocklist only for blocklist-related labels", async () => {
-      // wording-level matches: the generic "blocklist" pattern, or a vendor
-      // name, where the recipient is the problem
-      for (const msg of [
-        "550 5.1.1 User unknown, see our blocklist policy",
-        "550 Invalid Recipient - https://community.mimecast.com/docs/DOC-1369#550",
-        "550 5.1.1 User unknown. Protected by Barracuda Networks",
-      ]) {
-        const result = await classify(msg);
-        assert.strictEqual(result.label, "user_unknown", msg);
-        assert.strictEqual(result.blocklist, undefined, msg);
-      }
-
-      const listed = await classify(
-        "554 5.7.1 Service unavailable; Client host [192.0.2.1] blocked using b.barracudacentral.org",
-      );
-      assert.strictEqual(listed.label, "ip_blacklisted");
-      assert.deepStrictEqual(listed.blocklist, {
-        name: "Barracuda",
-        type: "ip",
-        host: true,
-      });
-    });
-
-    it("should report a hostname-level blocklist whatever the label", async () => {
-      const result = await classify("b.barracudacentral.org");
-      assert.strictEqual(result.label, "unknown");
-      assert.deepStrictEqual(result.blocklist, {
-        name: "Barracuda",
-        type: "ip",
-        host: true,
-      });
-    });
-
-    it("should identify blocklist when present", async () => {
-      const result = await classify("550 Blocked by zen.spamhaus.org");
-      assert.ok(result.blocklist);
-      // May return lists array when multiple patterns match
-      const name =
-        result.blocklist.name ||
-        (result.blocklist.lists && result.blocklist.lists[0]?.name);
-      assert.ok(
-        name === "Spamhaus ZEN" || name === "Spamhaus",
-        `Expected Spamhaus blocklist, got: ${name}`,
-      );
-    });
-
-    it("should set usedFallback when confidence is low", async () => {
-      const result = await classify("550 5.1.1 test");
-      if (result.confidence < 0.5) {
+        assert.strictEqual(result.label, 'spam_blocked');
         assert.strictEqual(result.usedFallback, true);
-      }
-    });
-  });
-});
-
-describe("Reset functionality", () => {
-  it("should reset classifier state", async () => {
-    await initialize();
-    assert.strictEqual(isReady(), true);
-
-    reset();
-    assert.strictEqual(isReady(), false);
-  });
-
-  it("should allow re-initialization after reset", async () => {
-    reset();
-    assert.strictEqual(isReady(), false);
-
-    await initialize();
-    assert.strictEqual(isReady(), true);
-
-    const result = await classify("550 User unknown");
-    assert.ok(result.label);
-
-    reset();
-  });
-});
-
-describe("Edge cases", () => {
-  before(async () => {
-    await initialize();
-  });
-
-  after(() => {
-    reset();
-  });
-
-  describe("Long messages", () => {
-    it("should handle very long messages", async () => {
-      // Create a message longer than MAX_LENGTH (100 tokens)
-      const longMessage =
-        "550 5.1.1 " + "User unknown error message ".repeat(50);
-      const result = await classify(longMessage);
-      assert.ok(result.label, "Should handle long messages");
-      assert.ok(result.confidence >= 0 && result.confidence <= 1);
     });
 
-    it("should handle messages with many words", async () => {
-      const manyWords = "550 " + "word ".repeat(200) + "user unknown";
-      const result = await classify(manyWords);
-      assert.ok(result.label, "Should handle many words");
-    });
-  });
-
-  describe("Special characters", () => {
-    it("should handle unicode characters", async () => {
-      const result = await classify("550 Usuario desconocido");
-      assert.ok(result.label, "Should handle Spanish text");
-    });
-
-    it("should handle email addresses in messages", async () => {
-      const result = await classify(
-        "550 5.1.1 <test@example.com>: Recipient address rejected",
-      );
-      assert.ok(result.label);
-    });
-
-    it("should handle URLs in messages", async () => {
-      const result = await classify(
-        "550 Blocked - see https://www.example.com/help for info",
-      );
-      assert.ok(result.label);
-    });
-
-    it("should handle newlines and tabs", async () => {
-      const result = await classify("550 5.1.1 User unknown\n\tPlease check");
-      assert.ok(result.label);
-    });
-
-    it("should handle empty-ish but valid messages", async () => {
-      const result = await classify("   550   ");
-      assert.ok(result.label);
-    });
-  });
-
-  describe("Numeric edge cases", () => {
-    it("should handle messages with only numbers", async () => {
-      const result = await classify("550 5.1.1 123456789");
-      assert.ok(result.label);
-    });
-
-    it("should handle IP addresses in messages", async () => {
-      const result = await classify("550 Connection from 192.168.1.1 rejected");
-      assert.ok(result.label);
-    });
-  });
-
-  describe("Multiple classifications", () => {
-    it("should handle multiple sequential classifications", async () => {
-      const messages = [
-        "550 5.1.1 User unknown",
-        "552 5.2.2 Mailbox full",
-        "421 Try again later",
-        "550 Blocked by spamhaus.org",
-        "550 5.7.1 SPF validation failed",
-      ];
-
-      for (const msg of messages) {
+    it('should report the model score of an overriding fallback label', async () => {
+        const msg = '550 5.1.1 The email account that you tried to reach does not exist';
+        const baseline = await classify(msg);
+        const override = Object.keys(baseline.scores).find(l => l !== baseline.label);
+        registerTextFallback({ pattern: /tried to reach/, label: override });
         const result = await classify(msg);
-        assert.ok(result.label, `Should classify: ${msg}`);
-      }
+        assert.strictEqual(result.label, override);
+        assert.strictEqual(result.modelLabel, baseline.label);
+        assert.strictEqual(result.confidence, result.scores[override]);
+        assert.ok(result.confidence < baseline.confidence);
     });
-  });
-});
 
-describe("Initialization edge cases", () => {
-  afterEach(() => {
-    reset();
-  });
-
-  it("should handle multiple sequential initialize calls", async () => {
-    await initialize();
-    await initialize(); // Should be idempotent
-    await initialize();
-    assert.strictEqual(isReady(), true);
-  });
-
-  it("should handle classify auto-initializing", async () => {
-    reset();
-    assert.strictEqual(isReady(), false);
-
-    // classify should auto-initialize
-    const result = await classify("550 User unknown");
-    assert.ok(result.label);
-    assert.strictEqual(isReady(), true);
-  });
-
-  it("should handle getLabels auto-initializing", async () => {
-    reset();
-    assert.strictEqual(isReady(), false);
-
-    const labels = await getLabels();
-    assert.strictEqual(labels.length, 16);
-    assert.strictEqual(isReady(), true);
-  });
-});
-
-describe("Score validation", () => {
-  before(async () => {
-    await initialize();
-  });
-
-  after(() => {
-    reset();
-  });
-
-  it("should return scores for all 16 labels", async () => {
-    const result = await classify("550 User unknown");
-    const scoreKeys = Object.keys(result.scores);
-    assert.strictEqual(scoreKeys.length, 16);
-  });
-
-  it("should have scores that sum approximately to 1", async () => {
-    const result = await classify("550 User unknown");
-    const sum = Object.values(result.scores).reduce((a, b) => a + b, 0);
-    // Softmax output should sum to approximately 1
-    assert.ok(sum > 0.99 && sum < 1.01, `Scores sum to ${sum}, expected ~1`);
-  });
-
-  it("should report the score of the returned label as confidence", async () => {
-    const result = await classify("550 User unknown");
-    assert.strictEqual(result.confidence, result.scores[result.label]);
-  });
-
-  it("should report the top score as confidence when the model label stands", async () => {
-    const result = await classify("452 4.2.2 The email account is over quota");
-    assert.strictEqual(result.modelLabel, undefined);
-    const maxScore = Math.max(...Object.values(result.scores));
-    assert.strictEqual(result.confidence, maxScore);
-  });
-
-  it("should have all scores between 0 and 1", async () => {
-    const result = await classify("550 User unknown");
-    for (const [label, score] of Object.entries(result.scores)) {
-      assert.ok(
-        score >= 0 && score <= 1,
-        `Score for ${label} is ${score}, expected 0-1`,
-      );
-    }
-  });
-});
-
-describe("getModelInfo", () => {
-  afterEach(() => {
-    reset();
-  });
-
-  it("should return an object with all nulls before initialization", () => {
-    reset();
-    const info = getModelInfo();
-    assert.ok(info && typeof info === "object", "expected object");
-    assert.strictEqual(info.initialized, false);
-    assert.strictEqual(info.modelHash, null);
-    assert.strictEqual(info.trainedAt, null);
-    assert.strictEqual(info.trainingSamples, null);
-    assert.strictEqual(info.validationAccuracy, null);
-  });
-
-  it("should return an object with the expected shape after init", async () => {
-    await initialize();
-    const info = getModelInfo();
-    assert.ok(info && typeof info === "object", "expected object");
-    assert.strictEqual(info.initialized, true);
-    for (const key of [
-      "modelHash",
-      "trainedAt",
-      "trainingSamples",
-      "validationAccuracy",
-    ]) {
-      assert.ok(key in info, `missing key: ${key}`);
-    }
-  });
-
-  it("should preserve falsy-but-valid config values (0, empty string)", async () => {
-    // Regression: prior implementation used `||`, coercing these to null.
-    const tmp = makeTmpModel({
-      model_hash: "",
-      trained_at: "1970-01-01T00:00:00Z",
-      training_samples: 0,
-      validation_accuracy: 0,
+    it('should omit modelLabel when the fallback agrees with the model', async () => {
+        const msg = '550 5.1.1 The email account that you tried to reach does not exist';
+        const baseline = await classify(msg);
+        registerTextFallback({ pattern: /tried to reach/, label: baseline.label });
+        const result = await classify(msg);
+        assert.strictEqual(result.usedFallback, true);
+        assert.strictEqual(result.modelLabel, undefined);
+        assert.strictEqual(result.confidence, baseline.confidence);
     });
-    try {
-      await initialize({ modelPath: tmp.path });
-      const info = getModelInfo();
-      assert.strictEqual(info.modelHash, "");
-      assert.strictEqual(info.trainingSamples, 0);
-      assert.strictEqual(info.validationAccuracy, 0);
-      assert.strictEqual(info.trainedAt, "1970-01-01T00:00:00Z");
-    } finally {
-      tmp.cleanup();
-    }
-  });
 
-  it("should fill all fields with null when config.json is missing", async () => {
-    // makeTmpModel writes a config.json by default; here we explicitly
-    // create one with an empty object, equivalent to "no metadata supplied".
-    const tmp = makeTmpModel({});
-    try {
-      await initialize({ modelPath: tmp.path });
-      const info = getModelInfo();
-      assert.strictEqual(info.modelHash, null);
-      assert.strictEqual(info.trainedAt, null);
-      assert.strictEqual(info.trainingSamples, null);
-      assert.strictEqual(info.validationAccuracy, null);
-    } finally {
-      tmp.cleanup();
-    }
-  });
-});
-
-describe("reload", () => {
-  afterEach(() => {
-    reset();
-  });
-
-  it("should re-initialize with the previously used path when called with no args", async () => {
-    await initialize();
-    assert.strictEqual(isReady(), true);
-    await reload();
-    assert.strictEqual(isReady(), true);
-    // Classification still works after reload.
-    const result = await classify("550 5.1.1 User unknown");
-    assert.ok(result.label);
-  });
-
-  it("should switch to a different model path when one is supplied", async () => {
-    await initialize();
-    const tmp = makeTmpModel({
-      model_hash: "tmp-hash-deadbeef",
-      trained_at: "2099-01-01T00:00:00Z",
-      training_samples: 42,
-      validation_accuracy: 0.5,
+    it('should report 0 confidence for a label the model does not know', async () => {
+        for (const label of ['custom_provider_block', 'constructor', '__proto__']) {
+            clearTextFallbacks();
+            registerTextFallback({ pattern: /XYZZY/, label });
+            const result = await classify('XYZZY rejected');
+            assert.strictEqual(result.label, label);
+            assert.strictEqual(result.confidence, 0);
+            assert.ok(result.modelLabel);
+            assert.strictEqual(result.action, 'review');
+        }
     });
-    try {
-      await reload({ modelPath: tmp.path });
-      const info = getModelInfo();
-      assert.strictEqual(info.modelHash, "tmp-hash-deadbeef");
-      assert.strictEqual(info.trainingSamples, 42);
-    } finally {
-      tmp.cleanup();
-    }
-  });
 
-  it("should wait for in-flight classify() calls before swapping", async () => {
-    await initialize();
-    const messages = Array.from(
-      { length: 20 },
-      (_, i) => `550 5.1.1 User ${i} unknown`,
-    );
-    const promises = messages.map((m) => classify(m));
-    // Fire reload while the above are still scheduled; all must resolve.
-    await reload();
-    const results = await Promise.all(promises);
-    assert.strictEqual(results.length, messages.length);
-    for (const r of results) assert.ok(r.label);
-    assert.strictEqual(isReady(), true);
-  });
-});
-
-describe("classifyBatch", () => {
-  before(async () => {
-    await initialize();
-  });
-
-  after(() => {
-    reset();
-  });
-
-  it("should classify a batch of messages", async () => {
-    const results = await classifyBatch([
-      "550 5.1.1 User unknown",
-      "552 5.2.2 Over quota",
-      "421 4.7.0 Try again later",
-    ]);
-    assert.strictEqual(results.length, 3);
-    for (const r of results) {
-      assert.ok(r.label);
-      assert.ok(typeof r.confidence === "number");
-      assert.ok(r.action);
-    }
-  });
-
-  it("should return empty array for empty input", async () => {
-    const results = await classifyBatch([]);
-    assert.deepStrictEqual(results, []);
-  });
-
-  it("should throw on non-array input", async () => {
-    await assert.rejects(
-      async () => classifyBatch("not an array"),
-      /expected an array/,
-    );
-    await assert.rejects(async () => classifyBatch(null), /expected an array/);
-  });
-
-  it("should surface per-item error with .index", async () => {
-    let caught;
-    try {
-      await classifyBatch(["valid message", "", "also valid"]);
-    } catch (err) {
-      caught = err;
-    }
-    assert.ok(caught, "expected error");
-    assert.strictEqual(caught.index, 1);
-    assert.match(caught.message, /classifyBatch\[1\]/);
-  });
-});
-
-describe("registerTextFallback / clearTextFallbacks", () => {
-  before(async () => {
-    await initialize();
-  });
-
-  afterEach(() => {
-    clearTextFallbacks();
-  });
-
-  after(() => {
-    reset();
-  });
-
-  it("should let a user pattern override built-in classification", async () => {
-    const msg = "XYZZY-PROVIDER-42: bounce for unknown reason";
-    registerTextFallback({
-      pattern: /XYZZY-PROVIDER-\d+/,
-      label: "spam_blocked",
+    it('should scan user patterns before built-ins', () => {
+        registerTextFallback({ pattern: /user unknown/i, label: 'spam_blocked' });
+        assert.strictEqual(getTextBasedFallback('User unknown'), 'spam_blocked');
     });
-    const result = await classify(msg);
-    assert.strictEqual(result.label, "spam_blocked");
-    assert.strictEqual(result.usedFallback, true);
-  });
 
-  it("should report the model score of an overriding fallback label", async () => {
-    const msg =
-      "550 5.1.1 The email account that you tried to reach does not exist";
-    const baseline = await classify(msg);
-    const override = Object.keys(baseline.scores).find(
-      (l) => l !== baseline.label,
-    );
-    registerTextFallback({ pattern: /tried to reach/, label: override });
-    const result = await classify(msg);
-    assert.strictEqual(result.label, override);
-    assert.strictEqual(result.modelLabel, baseline.label);
-    assert.strictEqual(result.confidence, result.scores[override]);
-    assert.ok(result.confidence < baseline.confidence);
-  });
+    it('should reject invalid patterns', () => {
+        assert.throws(() => registerTextFallback({ pattern: 'not a regex', label: 'unknown' }), /pattern must be a RegExp/);
+        assert.throws(() => registerTextFallback({ pattern: /x/, label: '' }), /label must be a non-empty string/);
+        assert.throws(() => registerTextFallback(null), /expected \{ pattern, label \} object/);
+    });
 
-  it("should omit modelLabel when the fallback agrees with the model", async () => {
-    const msg =
-      "550 5.1.1 The email account that you tried to reach does not exist";
-    const baseline = await classify(msg);
-    registerTextFallback({ pattern: /tried to reach/, label: baseline.label });
-    const result = await classify(msg);
-    assert.strictEqual(result.usedFallback, true);
-    assert.strictEqual(result.modelLabel, undefined);
-    assert.strictEqual(result.confidence, baseline.confidence);
-  });
-
-  it("should report 0 confidence for a label the model does not know", async () => {
-    for (const label of ["custom_provider_block", "constructor", "__proto__"]) {
-      clearTextFallbacks();
-      registerTextFallback({ pattern: /XYZZY/, label });
-      const result = await classify("XYZZY rejected");
-      assert.strictEqual(result.label, label);
-      assert.strictEqual(result.confidence, 0);
-      assert.ok(result.modelLabel);
-      assert.strictEqual(result.action, "review");
-    }
-  });
-
-  it("should scan user patterns before built-ins", () => {
-    registerTextFallback({ pattern: /user unknown/i, label: "spam_blocked" });
-    assert.strictEqual(getTextBasedFallback("User unknown"), "spam_blocked");
-  });
-
-  it("should reject invalid patterns", () => {
-    assert.throws(
-      () => registerTextFallback({ pattern: "not a regex", label: "unknown" }),
-      /pattern must be a RegExp/,
-    );
-    assert.throws(
-      () => registerTextFallback({ pattern: /x/, label: "" }),
-      /label must be a non-empty string/,
-    );
-    assert.throws(
-      () => registerTextFallback(null),
-      /expected \{ pattern, label \} object/,
-    );
-  });
-
-  it("should restore built-in behavior after clearTextFallbacks", () => {
-    registerTextFallback({ pattern: /user unknown/i, label: "spam_blocked" });
-    assert.strictEqual(getTextBasedFallback("User unknown"), "spam_blocked");
-    clearTextFallbacks();
-    assert.strictEqual(getTextBasedFallback("User unknown"), "user_unknown");
-  });
+    it('should restore built-in behavior after clearTextFallbacks', () => {
+        registerTextFallback({ pattern: /user unknown/i, label: 'spam_blocked' });
+        assert.strictEqual(getTextBasedFallback('User unknown'), 'spam_blocked');
+        clearTextFallbacks();
+        assert.strictEqual(getTextBasedFallback('User unknown'), 'user_unknown');
+    });
 });
 
-describe("initialize onProgress", () => {
-  afterEach(() => {
-    reset();
-  });
+describe('initialize onProgress', () => {
+    afterEach(() => {
+        reset();
+    });
 
-  it("should fire progress events for each phase", async () => {
-    const events = [];
-    await initialize({ onProgress: (p) => events.push(p) });
-    const phases = new Set(events.map((e) => e.phase));
-    // All four phases should be seen at least once.
-    for (const expected of ["vocab", "labels", "weights", "config"]) {
-      assert.ok(phases.has(expected), `missing phase: ${expected}`);
-    }
-    // Every event has the expected shape.
-    for (const e of events) {
-      assert.ok(typeof e.loaded === "number");
-      assert.ok(typeof e.total === "number");
-      assert.ok(e.loaded <= e.total);
-    }
-  });
+    it('should fire progress events for each phase', async () => {
+        const events = [];
+        await initialize({ onProgress: p => events.push(p) });
+        const phases = new Set(events.map(e => e.phase));
+        // All four phases should be seen at least once.
+        for (const expected of ['vocab', 'labels', 'weights', 'config']) {
+            assert.ok(phases.has(expected), `missing phase: ${expected}`);
+        }
+        // Every event has the expected shape.
+        for (const e of events) {
+            assert.ok(typeof e.loaded === 'number');
+            assert.ok(typeof e.total === 'number');
+            assert.ok(e.loaded <= e.total);
+        }
+    });
 });

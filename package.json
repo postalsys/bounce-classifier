@@ -1,64 +1,64 @@
 {
-  "name": "@postalsys/bounce-classifier",
-  "version": "3.0.2",
-  "description": "SMTP bounce message classifier using machine learning",
-  "author": "Andris Reinman",
-  "license": "MIT",
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./src/index.js",
-  "exports": {
-    ".": {
-      "types": "./src/index.d.ts",
-      "import": "./src/index.js",
-      "require": "./dist/index.cjs"
+    "name": "@postalsys/bounce-classifier",
+    "version": "3.0.2",
+    "description": "SMTP bounce message classifier using machine learning",
+    "author": "Andris Reinman",
+    "license": "MIT",
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./src/index.js",
+    "exports": {
+        ".": {
+            "types": "./src/index.d.ts",
+            "import": "./src/index.js",
+            "require": "./dist/index.cjs"
+        },
+        "./model/*": "./model/*"
     },
-    "./model/*": "./model/*"
-  },
-  "types": "./src/index.d.ts",
-  "files": [
-    "src",
-    "dist",
-    "model",
-    "!model/keras_model.h5"
-  ],
-  "scripts": {
-    "build": "node build.js",
-    "test": "node --test test/test.js",
-    "test:coverage": "c8 npm test",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "update-model": "node scripts/update-model.js",
-    "update": "rm -rf node_modules package-lock.json && ncu -u && npm install",
-    "prepublishOnly": "npm run update-model && npm run build"
-  },
-  "devDependencies": {
-    "@eslint/js": "10.0.1",
-    "c8": "12.0.0",
-    "esbuild": "0.28.2",
-    "eslint": "10.13.0",
-    "eslint-config-prettier": "10.1.8",
-    "globals": "17.13.0",
-    "prettier": "3.9.10"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/postalsys/bounce-classifier.git"
-  },
-  "keywords": [
-    "smtp",
-    "bounce",
-    "email",
-    "classifier",
-    "machine-learning"
-  ],
-  "homepage": "https://github.com/postalsys/bounce-classifier#readme",
-  "bugs": {
-    "url": "https://github.com/postalsys/bounce-classifier/issues"
-  }
+    "types": "./src/index.d.ts",
+    "files": [
+        "src",
+        "dist",
+        "model",
+        "!model/keras_model.h5"
+    ],
+    "scripts": {
+        "build": "node build.js",
+        "test": "node --test test/test.js",
+        "test:coverage": "c8 npm test",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "update-model": "node scripts/update-model.js",
+        "update": "rm -rf node_modules package-lock.json && ncu -u && npm install",
+        "prepublishOnly": "npm run update-model && npm run build"
+    },
+    "devDependencies": {
+        "@eslint/js": "10.0.1",
+        "c8": "12.0.0",
+        "esbuild": "0.28.2",
+        "eslint": "10.13.0",
+        "eslint-config-prettier": "10.1.8",
+        "globals": "17.13.0",
+        "prettier": "3.9.10"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/postalsys/bounce-classifier.git"
+    },
+    "keywords": [
+        "smtp",
+        "bounce",
+        "email",
+        "classifier",
+        "machine-learning"
+    ],
+    "homepage": "https://github.com/postalsys/bounce-classifier#readme",
+    "bugs": {
+        "url": "https://github.com/postalsys/bounce-classifier/issues"
+    }
 }

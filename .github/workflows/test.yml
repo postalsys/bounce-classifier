@@ -1,23 +1,23 @@
 name: Run tests
 
 on:
-  push:
-  pull_request:
+    push:
+    pull_request:
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        node: [22.x, 24.x]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-      - run: npm ci
-      - name: Download model
-        run: npm run update-model
-      - run: npm test
+    test:
+        strategy:
+            matrix:
+                node: [22.x, 24.x]
+                os: [ubuntu-latest]
+        runs-on: ${{ matrix.os }}
+        steps:
+            - uses: actions/checkout@v4
+            - name: Use Node.js ${{ matrix.node }}
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node }}
+            - run: npm ci
+            - name: Download model
+              run: npm run update-model
+            - run: npm test

@@ -12,14 +12,13 @@ const MAX_MESSAGE_LENGTH = 10000; // Max characters per message
 const EMBEDDING_DIM = 64;
 const HIDDEN_DIM = 64;
 const NUM_LABELS = 16;
-const UNKNOWN_LABEL = "unknown";
+const UNKNOWN_LABEL = 'unknown';
 // Blocklist names that match almost any "blocked" message and would crowd
 // out a more specific provider hit if they appeared in the result.
-const GENERIC_BLOCKLIST_NAMES = new Set(["RBL", "DNSBL", "Blocklist"]);
+const GENERIC_BLOCKLIST_NAMES = new Set(['RBL', 'DNSBL', 'Blocklist']);
 
 // Detect environment
-const isBrowser =
-  typeof window !== "undefined" && typeof window.document !== "undefined";
+const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
 
 // Node.js modules - loaded lazily on first use for browser compatibility
 // In Node.js these are loaded once; in browser these remain null
@@ -29,238 +28,216 @@ let _url = null;
 let _nodeModulesLoaded = false;
 
 async function loadNodeModules() {
-  if (_nodeModulesLoaded || isBrowser) return;
-  _nodeModulesLoaded = true;
+    if (_nodeModulesLoaded || isBrowser) return;
+    _nodeModulesLoaded = true;
 
-  // Use dynamic import for ESM compatibility
-  // esbuild converts these to require() in CJS bundle, which pkg can trace
-  _fs = await import("fs");
-  _path = await import("path");
-  _url = await import("url");
+    // Use dynamic import for ESM compatibility
+    // esbuild converts these to require() in CJS bundle, which pkg can trace
+    _fs = await import('fs');
+    _path = await import('path');
+    _url = await import('url');
 }
 
 // Action mapping based on bounce category
 export const ACTION_MAP = {
-  // Permanent failures - remove from list
-  user_unknown: "remove",
-  invalid_address: "remove",
-  mailbox_disabled: "remove",
+    // Permanent failures - remove from list
+    user_unknown: 'remove',
+    invalid_address: 'remove',
+    mailbox_disabled: 'remove',
 
-  // Temporary failures - retry later
-  greylisting: "retry",
-  rate_limited: "retry",
-  server_error: "retry",
-  mailbox_full: "retry",
+    // Temporary failures - retry later
+    greylisting: 'retry',
+    rate_limited: 'retry',
+    server_error: 'retry',
+    mailbox_full: 'retry',
 
-  // IP/domain issues - retry with different IP or fix configuration
-  ip_blacklisted: "retry_different_ip",
-  domain_blacklisted: "fix_configuration",
+    // IP/domain issues - retry with different IP or fix configuration
+    ip_blacklisted: 'retry_different_ip',
+    domain_blacklisted: 'fix_configuration',
 
-  // Authentication issues - fix sender configuration
-  auth_failure: "fix_configuration",
+    // Authentication issues - fix sender configuration
+    auth_failure: 'fix_configuration',
 
-  // Content/policy issues - modify message or manual review
-  spam_blocked: "review",
-  policy_blocked: "review",
-  virus_detected: "remove_content",
-  geo_blocked: "retry_different_ip",
-  relay_denied: "fix_configuration",
+    // Content/policy issues - modify message or manual review
+    spam_blocked: 'review',
+    policy_blocked: 'review',
+    virus_detected: 'remove_content',
+    geo_blocked: 'retry_different_ip',
+    relay_denied: 'fix_configuration',
 
-  // Unknown - manual review
-  unknown: "review",
+    // Unknown - manual review
+    unknown: 'review'
 };
 
 // Mail security vendors are named in ordinary rejections too (Mimecast links
 // its "Invalid Recipient" help page, appliances sign "Protected by Barracuda
 // Networks"), so a vendor only counts as a blocklist when its DNSBL or lookup
 // hostname appears, or its name sits next to explicit listing wording.
-const BLOCKLIST_WORDING =
-  "\\b(?:block(?:ed|ing|list(?:ed)?)?|blacklist(?:ed)?|listed|rbl|dnsbl|reputation)\\b";
+const BLOCKLIST_WORDING = '\\b(?:block(?:ed|ing|list(?:ed)?)?|blacklist(?:ed)?|listed|rbl|dnsbl|reputation)\\b';
 
 function nearWording(term, wording = BLOCKLIST_WORDING) {
-  return new RegExp(
-    `\\b${term}\\b.{0,60}${wording}|${wording}.{0,60}\\b${term}\\b`,
-    "i",
-  );
+    return new RegExp(`\\b${term}\\b.{0,60}${wording}|${wording}.{0,60}\\b${term}\\b`, 'i');
 }
 
 // A vendor yields a hostname-level entry (its DNSBL or lookup host was named,
 // which is evidence on its own) and a wording-level entry (its name next to
 // listing wording, trusted only when the classifier agrees on a block).
 function vendorBlocklistEntries(vendor, name, hostnames) {
-  const entries = [
-    { pattern: nearWording(vendor), name, type: "ip", host: false },
-  ];
-  if (hostnames) {
-    entries.unshift({
-      pattern: new RegExp(hostnames, "i"),
-      name,
-      type: "ip",
-      host: true,
-    });
-  }
-  return entries;
+    const entries = [{ pattern: nearWording(vendor), name, type: 'ip', host: false }];
+    if (hostnames) {
+        entries.unshift({
+            pattern: new RegExp(hostnames, 'i'),
+            name,
+            type: 'ip',
+            host: true
+        });
+    }
+    return entries;
 }
 
 // Classification labels a blocklist hit is reported for. Other labels (an
 // unknown recipient, a full mailbox) are not caused by a listing, whatever
 // the message happens to mention.
-const BLOCKLIST_LABELS = new Set([
-  "ip_blacklisted",
-  "domain_blacklisted",
-  "spam_blocked",
-  "policy_blocked",
-]);
+const BLOCKLIST_LABELS = new Set(['ip_blacklisted', 'domain_blacklisted', 'spam_blocked', 'policy_blocked']);
 
 // Known blocklists and their patterns
 export const BLOCKLIST_PATTERNS = [
-  // Spamhaus
-  { pattern: /spamhaus\.org/i, name: "Spamhaus", type: "ip", host: true },
-  { pattern: /\bsbl\b/i, name: "Spamhaus SBL", type: "ip", host: false },
-  { pattern: /\bxbl\b/i, name: "Spamhaus XBL", type: "ip", host: false },
-  { pattern: /\bpbl\b/i, name: "Spamhaus PBL", type: "ip", host: false },
-  {
-    pattern: /\bdbl\.spamhaus/i,
-    name: "Spamhaus DBL",
-    type: "domain",
-    host: true,
-  },
-  { pattern: /\bzen\.spamhaus/i, name: "Spamhaus ZEN", type: "ip", host: true },
+    // Spamhaus
+    { pattern: /spamhaus\.org/i, name: 'Spamhaus', type: 'ip', host: true },
+    { pattern: /\bsbl\b/i, name: 'Spamhaus SBL', type: 'ip', host: false },
+    { pattern: /\bxbl\b/i, name: 'Spamhaus XBL', type: 'ip', host: false },
+    { pattern: /\bpbl\b/i, name: 'Spamhaus PBL', type: 'ip', host: false },
+    {
+        pattern: /\bdbl\.spamhaus/i,
+        name: 'Spamhaus DBL',
+        type: 'domain',
+        host: true
+    },
+    { pattern: /\bzen\.spamhaus/i, name: 'Spamhaus ZEN', type: 'ip', host: true },
 
-  // Barracuda
-  ...vendorBlocklistEntries("barracuda", "Barracuda", "barracudacentral\\.org"),
+    // Barracuda
+    ...vendorBlocklistEntries('barracuda', 'Barracuda', 'barracudacentral\\.org'),
 
-  // SORBS
-  { pattern: /sorbs\.net/i, name: "SORBS", type: "ip", host: true },
-  { pattern: /dnsbl\.sorbs/i, name: "SORBS", type: "ip", host: true },
+    // SORBS
+    { pattern: /sorbs\.net/i, name: 'SORBS', type: 'ip', host: true },
+    { pattern: /dnsbl\.sorbs/i, name: 'SORBS', type: 'ip', host: true },
 
-  // SpamCop
-  { pattern: /spamcop\.net/i, name: "SpamCop", type: "ip", host: true },
+    // SpamCop
+    { pattern: /spamcop\.net/i, name: 'SpamCop', type: 'ip', host: true },
 
-  // URIBL
-  { pattern: /uribl\.com/i, name: "URIBL", type: "uri", host: true },
-  { pattern: /multi\.uribl/i, name: "URIBL", type: "uri", host: true },
+    // URIBL
+    { pattern: /uribl\.com/i, name: 'URIBL', type: 'uri', host: true },
+    { pattern: /multi\.uribl/i, name: 'URIBL', type: 'uri', host: true },
 
-  // Cloudmark
-  ...vendorBlocklistEntries("cloudmark", "Cloudmark", "csi\\.cloudmark\\.com"),
+    // Cloudmark
+    ...vendorBlocklistEntries('cloudmark', 'Cloudmark', 'csi\\.cloudmark\\.com'),
 
-  // Proofpoint
-  ...vendorBlocklistEntries(
-    "proofpoint",
-    "Proofpoint",
-    "(?:ipcheck|prs)\\.proofpoint\\.com",
-  ),
+    // Proofpoint
+    ...vendorBlocklistEntries('proofpoint', 'Proofpoint', '(?:ipcheck|prs)\\.proofpoint\\.com'),
 
-  // Mimecast
-  ...vendorBlocklistEntries("mimecast", "Mimecast"),
+    // Mimecast
+    ...vendorBlocklistEntries('mimecast', 'Mimecast'),
 
-  // Microsoft
-  {
-    pattern: /\bS3150\b/i,
-    name: "Microsoft Blocklist",
-    type: "ip",
-    host: false,
-  },
+    // Microsoft
+    {
+        pattern: /\bS3150\b/i,
+        name: 'Microsoft Blocklist',
+        type: 'ip',
+        host: false
+    },
 
-  // Invaluement
-  { pattern: /invaluement/i, name: "Invaluement", type: "ip", host: false },
+    // Invaluement
+    { pattern: /invaluement/i, name: 'Invaluement', type: 'ip', host: false },
 
-  // Hostkarma
-  { pattern: /hostkarma/i, name: "Hostkarma", type: "ip", host: false },
+    // Hostkarma
+    { pattern: /hostkarma/i, name: 'Hostkarma', type: 'ip', host: false },
 
-  // Trend Micro
-  ...vendorBlocklistEntries(
-    "trend\\s*micro",
-    "Trend Micro",
-    "ers\\.trendmicro\\.com",
-  ),
+    // Trend Micro
+    ...vendorBlocklistEntries('trend\\s*micro', 'Trend Micro', 'ers\\.trendmicro\\.com'),
 
-  // Generic RBL detection. A bare "RBL" also turns up in unrelated text, so
-  // it needs listing wording nearby or a DNSBL hostname carrying the term.
-  {
-    pattern: /\b(?:dns|spam)?rbl\.[a-z0-9-]*[a-z]/i,
-    name: "RBL",
-    type: "ip",
-    host: true,
-  },
-  {
-    pattern: nearWording(
-      "rbl",
-      "\\b(?:block(?:ed|ing|list(?:ed)?)?|blacklist(?:ed)?|listed)\\b",
-    ),
-    name: "RBL",
-    type: "ip",
-    host: false,
-  },
-  { pattern: /\bdnsbl\b/i, name: "DNSBL", type: "ip", host: false },
-  { pattern: /blacklist/i, name: "Blocklist", type: "ip", host: false },
-  { pattern: /blocklist/i, name: "Blocklist", type: "ip", host: false },
+    // Generic RBL detection. A bare "RBL" also turns up in unrelated text, so
+    // it needs listing wording nearby or a DNSBL hostname carrying the term.
+    {
+        pattern: /\b(?:dns|spam)?rbl\.[a-z0-9-]*[a-z]/i,
+        name: 'RBL',
+        type: 'ip',
+        host: true
+    },
+    {
+        pattern: nearWording('rbl', '\\b(?:block(?:ed|ing|list(?:ed)?)?|blacklist(?:ed)?|listed)\\b'),
+        name: 'RBL',
+        type: 'ip',
+        host: false
+    },
+    { pattern: /\bdnsbl\b/i, name: 'DNSBL', type: 'ip', host: false },
+    { pattern: /blacklist/i, name: 'Blocklist', type: 'ip', host: false },
+    { pattern: /blocklist/i, name: 'Blocklist', type: 'ip', host: false }
 ];
 
 // SMTP Enhanced Status Code mapping (RFC 3463)
 export const SMTP_CODE_MAP = {
-  "5.1.1": "user_unknown",
-  "5.1.2": "invalid_address",
-  "5.1.3": "invalid_address",
-  "5.1.6": "invalid_address",
-  "4.1.1": "user_unknown",
-  "5.2.0": "user_unknown",
-  "5.2.1": "mailbox_disabled",
-  "5.2.2": "mailbox_full",
-  "5.2.3": "rate_limited",
-  "4.2.0": "greylisting",
-  "4.2.1": "rate_limited",
-  "4.2.2": "mailbox_full",
-  "5.3.0": "server_error",
-  "5.3.1": "server_error",
-  "5.3.2": "server_error",
-  "4.3.0": "server_error",
-  "4.3.1": "server_error",
-  "4.3.2": "server_error",
-  "5.4.1": "user_unknown",
-  "5.4.4": "server_error",
-  "4.4.1": "server_error",
-  "4.4.2": "server_error",
-  "5.5.0": "user_unknown",
-  "5.5.1": "invalid_address",
-  "5.5.2": "invalid_address",
-  "5.6.1": "policy_blocked",
-  "5.6.2": "policy_blocked",
-  "5.7.0": "virus_detected",
-  "5.7.1": "policy_blocked",
-  "5.7.2": "relay_denied",
-  "5.7.8": "auth_failure",
-  "5.7.9": "auth_failure",
-  "5.7.23": "auth_failure",
-  "5.7.25": "auth_failure",
-  "5.7.26": "auth_failure",
-  "4.7.0": "rate_limited",
-  "4.7.1": "rate_limited",
-  "4.7.3": "rate_limited",
-  "4.7.28": "rate_limited",
-  "4.7.32": "rate_limited",
-  "4.7.650": "rate_limited",
-  "4.7.651": "rate_limited",
-  "5.2.121": "rate_limited",
-  "5.2.122": "rate_limited",
+    '5.1.1': 'user_unknown',
+    '5.1.2': 'invalid_address',
+    '5.1.3': 'invalid_address',
+    '5.1.6': 'invalid_address',
+    '4.1.1': 'user_unknown',
+    '5.2.0': 'user_unknown',
+    '5.2.1': 'mailbox_disabled',
+    '5.2.2': 'mailbox_full',
+    '5.2.3': 'rate_limited',
+    '4.2.0': 'greylisting',
+    '4.2.1': 'rate_limited',
+    '4.2.2': 'mailbox_full',
+    '5.3.0': 'server_error',
+    '5.3.1': 'server_error',
+    '5.3.2': 'server_error',
+    '4.3.0': 'server_error',
+    '4.3.1': 'server_error',
+    '4.3.2': 'server_error',
+    '5.4.1': 'user_unknown',
+    '5.4.4': 'server_error',
+    '4.4.1': 'server_error',
+    '4.4.2': 'server_error',
+    '5.5.0': 'user_unknown',
+    '5.5.1': 'invalid_address',
+    '5.5.2': 'invalid_address',
+    '5.6.1': 'policy_blocked',
+    '5.6.2': 'policy_blocked',
+    '5.7.0': 'virus_detected',
+    '5.7.1': 'policy_blocked',
+    '5.7.2': 'relay_denied',
+    '5.7.8': 'auth_failure',
+    '5.7.9': 'auth_failure',
+    '5.7.23': 'auth_failure',
+    '5.7.25': 'auth_failure',
+    '5.7.26': 'auth_failure',
+    '4.7.0': 'rate_limited',
+    '4.7.1': 'rate_limited',
+    '4.7.3': 'rate_limited',
+    '4.7.28': 'rate_limited',
+    '4.7.32': 'rate_limited',
+    '4.7.650': 'rate_limited',
+    '4.7.651': 'rate_limited',
+    '5.2.121': 'rate_limited',
+    '5.2.122': 'rate_limited'
 };
 
 export const SMTP_MAIN_CODE_MAP = {
-  421: "greylisting",
-  450: "greylisting",
-  451: "server_error",
-  452: "server_error",
-  500: "invalid_address",
-  501: "invalid_address",
-  502: "server_error",
-  503: "server_error",
-  504: "server_error",
-  550: "user_unknown",
-  551: "relay_denied",
-  552: "mailbox_full",
-  553: "invalid_address",
-  554: "policy_blocked",
-  571: "spam_blocked",
+    421: 'greylisting',
+    450: 'greylisting',
+    451: 'server_error',
+    452: 'server_error',
+    500: 'invalid_address',
+    501: 'invalid_address',
+    502: 'server_error',
+    503: 'server_error',
+    504: 'server_error',
+    550: 'user_unknown',
+    551: 'relay_denied',
+    552: 'mailbox_full',
+    553: 'invalid_address',
+    554: 'policy_blocked',
+    571: 'spam_blocked'
 };
 
 export const CODE_FALLBACK_THRESHOLD = 0.5;
@@ -269,19 +246,16 @@ export const CODE_FALLBACK_THRESHOLD = 0.5;
  * Extract SMTP codes from a message
  */
 export function extractSmtpCodes(message) {
-  const result = { mainCode: null, extendedCode: null };
-  const mainMatch = message.match(/^(\d{3})[\s-]/);
-  if (mainMatch) result.mainCode = mainMatch[1];
-  // Lookbehind/lookahead reject codes embedded inside IPv4 addresses
-  // (e.g. `5.7.1.100` must not yield `5.7.1`, and `192.168.1.1` must not
-  // yield `2.168.1`). Without these, RFC 3463 fallback misclassifies bounces
-  // that mention an IP whose first octets coincide with a real status code.
-  const extMatch = message.match(
-    /(?<!\d\.)\b([245])\.(\d{1,3})\.(\d{1,3})(?!\.\d)\b/,
-  );
-  if (extMatch)
-    result.extendedCode = `${extMatch[1]}.${extMatch[2]}.${extMatch[3]}`;
-  return result;
+    const result = { mainCode: null, extendedCode: null };
+    const mainMatch = message.match(/^(\d{3})[\s-]/);
+    if (mainMatch) result.mainCode = mainMatch[1];
+    // Lookbehind/lookahead reject codes embedded inside IPv4 addresses
+    // (e.g. `5.7.1.100` must not yield `5.7.1`, and `192.168.1.1` must not
+    // yield `2.168.1`). Without these, RFC 3463 fallback misclassifies bounces
+    // that mention an IP whose first octets coincide with a real status code.
+    const extMatch = message.match(/(?<!\d\.)\b([245])\.(\d{1,3})\.(\d{1,3})(?!\.\d)\b/);
+    if (extMatch) result.extendedCode = `${extMatch[1]}.${extMatch[2]}.${extMatch[3]}`;
+    return result;
 }
 
 // User-registered text pattern fallbacks. Scanned BEFORE the built-ins so
@@ -299,17 +273,17 @@ const USER_TEXT_FALLBACKS = [];
  * @param {string} entry.label - Label to assign when the pattern matches.
  */
 export function registerTextFallback(entry) {
-  if (!entry || typeof entry !== "object") {
-    throw new Error("registerTextFallback: expected { pattern, label } object");
-  }
-  const { pattern, label } = entry;
-  if (!(pattern instanceof RegExp)) {
-    throw new Error("registerTextFallback: pattern must be a RegExp");
-  }
-  if (typeof label !== "string" || label.length === 0) {
-    throw new Error("registerTextFallback: label must be a non-empty string");
-  }
-  USER_TEXT_FALLBACKS.push({ pattern, label });
+    if (!entry || typeof entry !== 'object') {
+        throw new Error('registerTextFallback: expected { pattern, label } object');
+    }
+    const { pattern, label } = entry;
+    if (!(pattern instanceof RegExp)) {
+        throw new Error('registerTextFallback: pattern must be a RegExp');
+    }
+    if (typeof label !== 'string' || label.length === 0) {
+        throw new Error('registerTextFallback: label must be a non-empty string');
+    }
+    USER_TEXT_FALLBACKS.push({ pattern, label });
 }
 
 /**
@@ -317,38 +291,38 @@ export function registerTextFallback(entry) {
  * are not affected.
  */
 export function clearTextFallbacks() {
-  USER_TEXT_FALLBACKS.length = 0;
+    USER_TEXT_FALLBACKS.length = 0;
 }
 
 // Text-based pattern fallbacks for common patterns
 // Note: .{0,100}? limits match length to prevent performance issues on long strings
 const TEXT_PATTERN_FALLBACKS = [
-  { pattern: /doesn't have a .{0,50}? account/i, label: "user_unknown" },
-  { pattern: /user doesn't have .{0,50}? account/i, label: "user_unknown" },
-  { pattern: /not a valid recipient/i, label: "user_unknown" },
-  { pattern: /no such user/i, label: "user_unknown" },
-  { pattern: /user unknown/i, label: "user_unknown" },
-  { pattern: /mailbox not found/i, label: "user_unknown" },
-  { pattern: /recipient rejected/i, label: "user_unknown" },
-  { pattern: /sender is unauthenticated/i, label: "auth_failure" },
-  { pattern: /requires .{0,50}? authenticate/i, label: "auth_failure" },
-  { pattern: /illegal attachment/i, label: "virus_detected" },
-  { pattern: /virus .{0,20}?detected/i, label: "virus_detected" },
-  { pattern: /infected .{0,20}?attachment/i, label: "virus_detected" },
-  { pattern: /malware .{0,20}?detected/i, label: "virus_detected" },
-  { pattern: /out of storage space/i, label: "mailbox_full" },
-  { pattern: /over ?quota/i, label: "mailbox_full" },
-  { pattern: /quota exceeded/i, label: "mailbox_full" },
-  { pattern: /mailbox.{0,20}?full/i, label: "mailbox_full" },
-  { pattern: /user unknown in/i, label: "user_unknown" },
-  { pattern: /address rejected.{0,30}?user unknown/i, label: "user_unknown" },
-  { pattern: /too many .{0,30}?connections/i, label: "rate_limited" },
-  { pattern: /too many .{0,30}?messages/i, label: "rate_limited" },
-  { pattern: /too many .{0,30}?recipients/i, label: "rate_limited" },
-  { pattern: /rate .{0,20}?limit/i, label: "rate_limited" },
-  { pattern: /sending .{0,20}?limit/i, label: "rate_limited" },
-  { pattern: /connection .{0,20}?limit/i, label: "rate_limited" },
-  { pattern: /throttl/i, label: "rate_limited" },
+    { pattern: /doesn't have a .{0,50}? account/i, label: 'user_unknown' },
+    { pattern: /user doesn't have .{0,50}? account/i, label: 'user_unknown' },
+    { pattern: /not a valid recipient/i, label: 'user_unknown' },
+    { pattern: /no such user/i, label: 'user_unknown' },
+    { pattern: /user unknown/i, label: 'user_unknown' },
+    { pattern: /mailbox not found/i, label: 'user_unknown' },
+    { pattern: /recipient rejected/i, label: 'user_unknown' },
+    { pattern: /sender is unauthenticated/i, label: 'auth_failure' },
+    { pattern: /requires .{0,50}? authenticate/i, label: 'auth_failure' },
+    { pattern: /illegal attachment/i, label: 'virus_detected' },
+    { pattern: /virus .{0,20}?detected/i, label: 'virus_detected' },
+    { pattern: /infected .{0,20}?attachment/i, label: 'virus_detected' },
+    { pattern: /malware .{0,20}?detected/i, label: 'virus_detected' },
+    { pattern: /out of storage space/i, label: 'mailbox_full' },
+    { pattern: /over ?quota/i, label: 'mailbox_full' },
+    { pattern: /quota exceeded/i, label: 'mailbox_full' },
+    { pattern: /mailbox.{0,20}?full/i, label: 'mailbox_full' },
+    { pattern: /user unknown in/i, label: 'user_unknown' },
+    { pattern: /address rejected.{0,30}?user unknown/i, label: 'user_unknown' },
+    { pattern: /too many .{0,30}?connections/i, label: 'rate_limited' },
+    { pattern: /too many .{0,30}?messages/i, label: 'rate_limited' },
+    { pattern: /too many .{0,30}?recipients/i, label: 'rate_limited' },
+    { pattern: /rate .{0,20}?limit/i, label: 'rate_limited' },
+    { pattern: /sending .{0,20}?limit/i, label: 'rate_limited' },
+    { pattern: /connection .{0,20}?limit/i, label: 'rate_limited' },
+    { pattern: /throttl/i, label: 'rate_limited' }
 ];
 
 /**
@@ -357,27 +331,27 @@ const TEXT_PATTERN_FALLBACKS = [
  * second.
  */
 export function getTextBasedFallback(message) {
-  for (const { pattern, label } of USER_TEXT_FALLBACKS) {
-    if (pattern.test(message)) return label;
-  }
-  for (const { pattern, label } of TEXT_PATTERN_FALLBACKS) {
-    if (pattern.test(message)) return label;
-  }
-  return null;
+    for (const { pattern, label } of USER_TEXT_FALLBACKS) {
+        if (pattern.test(message)) return label;
+    }
+    for (const { pattern, label } of TEXT_PATTERN_FALLBACKS) {
+        if (pattern.test(message)) return label;
+    }
+    return null;
 }
 
 /**
  * Get fallback classification based on SMTP codes alone (no text scan).
  */
 function getSmtpCodeFallback(message) {
-  const codes = extractSmtpCodes(message);
-  if (codes.extendedCode && SMTP_CODE_MAP[codes.extendedCode]) {
-    return SMTP_CODE_MAP[codes.extendedCode];
-  }
-  if (codes.mainCode && SMTP_MAIN_CODE_MAP[codes.mainCode]) {
-    return SMTP_MAIN_CODE_MAP[codes.mainCode];
-  }
-  return null;
+    const codes = extractSmtpCodes(message);
+    if (codes.extendedCode && SMTP_CODE_MAP[codes.extendedCode]) {
+        return SMTP_CODE_MAP[codes.extendedCode];
+    }
+    if (codes.mainCode && SMTP_MAIN_CODE_MAP[codes.mainCode]) {
+        return SMTP_MAIN_CODE_MAP[codes.mainCode];
+    }
+    return null;
 }
 
 /**
@@ -385,99 +359,98 @@ function getSmtpCodeFallback(message) {
  * SMTP codes.
  */
 export function getCodeBasedFallback(message) {
-  return getTextBasedFallback(message) ?? getSmtpCodeFallback(message);
+    return getTextBasedFallback(message) ?? getSmtpCodeFallback(message);
 }
 
 // Retry timing patterns
 // Note: .{0,50}? limits match length to prevent performance issues on long strings
 const RETRY_PATTERNS = [
-  {
-    pattern: /try\s+again\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
-  {
-    pattern: /retry\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
-  { pattern: /wait\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
-  {
-    pattern:
-      /greylisted?\s+(?:for\s+)?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
-  {
-    pattern: /delayed?\s+(?:for\s+)?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
-  {
-    pattern: /come\s+back\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
-  { pattern: /after\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
-  { pattern: /\b(\d+)\s*(second|minute|hour)s?\b/i, unit: 2 },
-  {
-    pattern: /too\s+many.{0,50}?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
-  {
-    pattern: /greylist.{0,50}?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
-    unit: 2,
-  },
+    {
+        pattern: /try\s+again\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    },
+    {
+        pattern: /retry\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    },
+    { pattern: /wait\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+    {
+        pattern: /greylisted?\s+(?:for\s+)?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    },
+    {
+        pattern: /delayed?\s+(?:for\s+)?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    },
+    {
+        pattern: /come\s+back\s+in\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    },
+    { pattern: /after\s+(\d+)\s*(second|minute|hour|min|sec|hr)s?/i, unit: 2 },
+    { pattern: /\b(\d+)\s*(second|minute|hour)s?\b/i, unit: 2 },
+    {
+        pattern: /too\s+many.{0,50}?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    },
+    {
+        pattern: /greylist.{0,50}?(\d+)\s*(second|minute|hour|min|sec|hr)s?/i,
+        unit: 2
+    }
 ];
 
 function toSeconds(value, unit) {
-  const num = parseInt(value, 10);
-  const u = unit.toLowerCase();
-  if (u.startsWith("sec") || u === "s") return num;
-  if (u.startsWith("min") || u === "m") return num * 60;
-  if (u.startsWith("hour") || u === "hr" || u === "h") return num * 3600;
-  return num;
+    const num = parseInt(value, 10);
+    const u = unit.toLowerCase();
+    if (u.startsWith('sec') || u === 's') return num;
+    if (u.startsWith('min') || u === 'm') return num * 60;
+    if (u.startsWith('hour') || u === 'hr' || u === 'h') return num * 3600;
+    return num;
 }
 
 /**
  * Extract retry timing from message
  */
 export function extractRetryTiming(message) {
-  for (const { pattern, unit } of RETRY_PATTERNS) {
-    const match = message.match(pattern);
-    if (match && match[1]) {
-      const seconds = toSeconds(match[1], match[unit] || "seconds");
-      if (seconds >= 1 && seconds <= 86400) {
-        return seconds;
-      }
+    for (const { pattern, unit } of RETRY_PATTERNS) {
+        const match = message.match(pattern);
+        if (match && match[1]) {
+            const seconds = toSeconds(match[1], match[unit] || 'seconds');
+            if (seconds >= 1 && seconds <= 86400) {
+                return seconds;
+            }
+        }
     }
-  }
-  return null;
+    return null;
 }
 
 /**
  * Identify blocklists mentioned in message
  */
 export function identifyBlocklist(message) {
-  const found = [];
-  for (const { pattern, name, type, host } of BLOCKLIST_PATTERNS) {
-    if (pattern.test(message)) {
-      const existing = found.find((b) => b.name === name);
-      if (existing) {
-        existing.host = existing.host || host;
-      } else {
-        found.push({ name, type, host });
-      }
+    const found = [];
+    for (const { pattern, name, type, host } of BLOCKLIST_PATTERNS) {
+        if (pattern.test(message)) {
+            const existing = found.find(b => b.name === name);
+            if (existing) {
+                existing.host = existing.host || host;
+            } else {
+                found.push({ name, type, host });
+            }
+        }
     }
-  }
-  if (found.length === 0) return null;
-  const specific = found.filter((b) => !GENERIC_BLOCKLIST_NAMES.has(b.name));
-  if (specific.length > 1) {
-    return { lists: specific, host: specific.some((b) => b.host) };
-  }
-  return specific.length === 1 ? specific[0] : found[0];
+    if (found.length === 0) return null;
+    const specific = found.filter(b => !GENERIC_BLOCKLIST_NAMES.has(b.name));
+    if (specific.length > 1) {
+        return { lists: specific, host: specific.some(b => b.host) };
+    }
+    return specific.length === 1 ? specific[0] : found[0];
 }
 
 /**
  * Get recommended action based on category
  */
 export function getAction(category) {
-  return Object.hasOwn(ACTION_MAP, category) ? ACTION_MAP[category] : "review";
+    return Object.hasOwn(ACTION_MAP, category) ? ACTION_MAP[category] : 'review';
 }
 
 /**
@@ -486,26 +459,26 @@ export function getAction(category) {
  * @param {string} context - Context for error messages
  * @returns {string} Sanitized message
  */
-function sanitizeMessage(message, context = "Message") {
-  if (message === null || message === undefined) {
-    throw new Error(`${context} must be a non-empty string`);
-  }
+function sanitizeMessage(message, context = 'Message') {
+    if (message === null || message === undefined) {
+        throw new Error(`${context} must be a non-empty string`);
+    }
 
-  if (typeof message !== "string") {
-    throw new Error(`${context} must be a string, got ${typeof message}`);
-  }
+    if (typeof message !== 'string') {
+        throw new Error(`${context} must be a string, got ${typeof message}`);
+    }
 
-  // Check for empty or whitespace-only strings
-  if (message.trim().length === 0) {
-    throw new Error(`${context} must not be empty or whitespace-only`);
-  }
+    // Check for empty or whitespace-only strings
+    if (message.trim().length === 0) {
+        throw new Error(`${context} must not be empty or whitespace-only`);
+    }
 
-  // Truncate overly long messages to prevent performance issues
-  if (message.length > MAX_MESSAGE_LENGTH) {
-    return message.substring(0, MAX_MESSAGE_LENGTH);
-  }
+    // Truncate overly long messages to prevent performance issues
+    if (message.length > MAX_MESSAGE_LENGTH) {
+        return message.substring(0, MAX_MESSAGE_LENGTH);
+    }
 
-  return message;
+    return message;
 }
 
 // Singleton state
@@ -524,48 +497,48 @@ let inFlightClassifies = 0;
 let drainWaiters = [];
 
 function endClassify() {
-  inFlightClassifies--;
-  if (inFlightClassifies === 0 && drainWaiters.length > 0) {
-    const waiters = drainWaiters;
-    drainWaiters = [];
-    for (const resolve of waiters) resolve();
-  }
+    inFlightClassifies--;
+    if (inFlightClassifies === 0 && drainWaiters.length > 0) {
+        const waiters = drainWaiters;
+        drainWaiters = [];
+        for (const resolve of waiters) resolve();
+    }
 }
 
 function waitForClassifyDrain() {
-  if (inFlightClassifies === 0) return Promise.resolve();
-  return new Promise((resolve) => drainWaiters.push(resolve));
+    if (inFlightClassifies === 0) return Promise.resolve();
+    return new Promise(resolve => drainWaiters.push(resolve));
 }
 
 /**
  * Preprocess text for tokenization
  */
 function preprocessText(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    return text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /**
  * Tokenize text using vocabulary
  */
 function tokenize(text) {
-  const processed = preprocessText(text);
-  const words = processed.split(" ");
-  const tokens = new Array(MAX_LENGTH).fill(0);
+    const processed = preprocessText(text);
+    const words = processed.split(' ');
+    const tokens = new Array(MAX_LENGTH).fill(0);
 
-  for (let i = 0; i < Math.min(words.length, MAX_LENGTH); i++) {
-    const word = words[i];
-    if (vocabMap.has(word)) {
-      tokens[i] = vocabMap.get(word);
-    } else {
-      tokens[i] = 1; // OOV token
+    for (let i = 0; i < Math.min(words.length, MAX_LENGTH); i++) {
+        const word = words[i];
+        if (vocabMap.has(word)) {
+            tokens[i] = vocabMap.get(word);
+        } else {
+            tokens[i] = 1; // OOV token
+        }
     }
-  }
 
-  return tokens;
+    return tokens;
 }
 
 /**
@@ -574,35 +547,34 @@ function tokenize(text) {
  * misconfigured path is diagnosable.
  */
 async function loadModelFile(filePath, parser) {
-  try {
-    if (isBrowser) {
-      const response = await fetch(filePath);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      return parser.browser(response);
+    try {
+        if (isBrowser) {
+            const response = await fetch(filePath);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return parser.browser(response);
+        }
+        await loadNodeModules();
+        return parser.node(await _fs.promises.readFile(filePath));
+    } catch (err) {
+        err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
+        throw err;
     }
-    await loadNodeModules();
-    return parser.node(await _fs.promises.readFile(filePath));
-  } catch (err) {
-    err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
-    throw err;
-  }
 }
 
 const JSON_PARSER = {
-  browser: (response) => response.json(),
-  node: (buffer) => JSON.parse(buffer.toString("utf8")),
+    browser: response => response.json(),
+    node: buffer => JSON.parse(buffer.toString('utf8'))
 };
 
 const WEIGHTS_PARSER = {
-  browser: async (response) => new Float32Array(await response.arrayBuffer()),
-  node: (buffer) =>
-    new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4),
+    browser: async response => new Float32Array(await response.arrayBuffer()),
+    node: buffer => new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
 };
 
-const loadJson = (filePath) => loadModelFile(filePath, JSON_PARSER);
-const loadWeights = (filePath) => loadModelFile(filePath, WEIGHTS_PARSER);
+const loadJson = filePath => loadModelFile(filePath, JSON_PARSER);
+const loadWeights = filePath => loadModelFile(filePath, WEIGHTS_PARSER);
 
 /**
  * Load weights with incremental progress reporting. Uses a streaming
@@ -612,42 +584,41 @@ const loadWeights = (filePath) => loadModelFile(filePath, WEIGHTS_PARSER);
  * conversion, not two.
  */
 async function loadWeightsWithProgress(filePath, onProgress) {
-  const emit = (loaded, total) =>
-    onProgress({ phase: "weights", loaded, total });
-  try {
-    if (isBrowser) {
-      const response = await fetch(filePath);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const total = Number(response.headers.get("Content-Length")) || 0;
-      if (!response.body?.getReader) {
-        const result = await WEIGHTS_PARSER.browser(response);
-        emit(result.byteLength, total || result.byteLength);
-        return result;
-      }
-      const reader = response.body.getReader();
-      const chunks = [];
-      let loaded = 0;
-      for (;;) {
-        // Stream chunks arrive in order, one read at a time
-        // eslint-disable-next-line no-await-in-loop
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.byteLength;
-        emit(loaded, total);
-      }
-      // Blob concatenates chunks natively; avoids a JS-side copy loop.
-      const buf = await new Blob(chunks).arrayBuffer();
-      return new Float32Array(buf);
+    const emit = (loaded, total) => onProgress({ phase: 'weights', loaded, total });
+    try {
+        if (isBrowser) {
+            const response = await fetch(filePath);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const total = Number(response.headers.get('Content-Length')) || 0;
+            if (!response.body?.getReader) {
+                const result = await WEIGHTS_PARSER.browser(response);
+                emit(result.byteLength, total || result.byteLength);
+                return result;
+            }
+            const reader = response.body.getReader();
+            const chunks = [];
+            let loaded = 0;
+            for (;;) {
+                // Stream chunks arrive in order, one read at a time
+                // eslint-disable-next-line no-await-in-loop
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                loaded += value.byteLength;
+                emit(loaded, total);
+            }
+            // Blob concatenates chunks natively; avoids a JS-side copy loop.
+            const buf = await new Blob(chunks).arrayBuffer();
+            return new Float32Array(buf);
+        }
+        await loadNodeModules();
+        const buf = await _fs.promises.readFile(filePath);
+        emit(buf.byteLength, buf.byteLength);
+        return WEIGHTS_PARSER.node(buf);
+    } catch (err) {
+        err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
+        throw err;
     }
-    await loadNodeModules();
-    const buf = await _fs.promises.readFile(filePath);
-    emit(buf.byteLength, buf.byteLength);
-    return WEIGHTS_PARSER.node(buf);
-  } catch (err) {
-    err.message = `Failed to load ${filePath} (model path: ${modelBasePath}): ${err.message}`;
-    throw err;
-  }
 }
 
 /**
@@ -660,43 +631,43 @@ async function loadWeightsWithProgress(filePath, onProgress) {
  * - embedding/embeddings: [5000, 64]
  */
 function parseWeights(data) {
-  let offset = 0;
+    let offset = 0;
 
-  // Dense layer 1: kernel [64, 64] and bias [64]
-  const dense1KernelSize = 64 * 64;
-  const dense1Kernel = data.slice(offset, offset + dense1KernelSize);
-  offset += dense1KernelSize;
+    // Dense layer 1: kernel [64, 64] and bias [64]
+    const dense1KernelSize = 64 * 64;
+    const dense1Kernel = data.slice(offset, offset + dense1KernelSize);
+    offset += dense1KernelSize;
 
-  const dense1BiasSize = 64;
-  const dense1Bias = data.slice(offset, offset + dense1BiasSize);
-  offset += dense1BiasSize;
+    const dense1BiasSize = 64;
+    const dense1Bias = data.slice(offset, offset + dense1BiasSize);
+    offset += dense1BiasSize;
 
-  // Dense layer 2: kernel [64, 16] and bias [16]
-  const dense2KernelSize = 64 * NUM_LABELS;
-  const dense2Kernel = data.slice(offset, offset + dense2KernelSize);
-  offset += dense2KernelSize;
+    // Dense layer 2: kernel [64, 16] and bias [16]
+    const dense2KernelSize = 64 * NUM_LABELS;
+    const dense2Kernel = data.slice(offset, offset + dense2KernelSize);
+    offset += dense2KernelSize;
 
-  const dense2BiasSize = NUM_LABELS;
-  const dense2Bias = data.slice(offset, offset + dense2BiasSize);
-  offset += dense2BiasSize;
+    const dense2BiasSize = NUM_LABELS;
+    const dense2Bias = data.slice(offset, offset + dense2BiasSize);
+    offset += dense2BiasSize;
 
-  // Embedding: [5000, 64]
-  const embedding = data.slice(offset);
+    // Embedding: [5000, 64]
+    const embedding = data.slice(offset);
 
-  return {
-    embedding,
-    dense1Kernel,
-    dense1Bias,
-    dense2Kernel,
-    dense2Bias,
-  };
+    return {
+        embedding,
+        dense1Kernel,
+        dense1Bias,
+        dense2Kernel,
+        dense2Bias
+    };
 }
 
 /**
  * ReLU activation function
  */
 function relu(x) {
-  return Math.max(0, x);
+    return Math.max(0, x);
 }
 
 /**
@@ -704,21 +675,21 @@ function relu(x) {
  * compute exponents/sum/normalize in one allocated output buffer.
  */
 function softmax(arr) {
-  let max = -Infinity;
-  for (let i = 0; i < arr.length; i++) {
-    if (arr[i] > max) max = arr[i];
-  }
-  const out = new Float32Array(arr.length);
-  let sum = 0;
-  for (let i = 0; i < arr.length; i++) {
-    const e = Math.exp(arr[i] - max);
-    out[i] = e;
-    sum += e;
-  }
-  for (let i = 0; i < arr.length; i++) {
-    out[i] /= sum;
-  }
-  return out;
+    let max = -Infinity;
+    for (let i = 0; i < arr.length; i++) {
+        if (arr[i] > max) max = arr[i];
+    }
+    const out = new Float32Array(arr.length);
+    let sum = 0;
+    for (let i = 0; i < arr.length; i++) {
+        const e = Math.exp(arr[i] - max);
+        out[i] = e;
+        sum += e;
+    }
+    for (let i = 0; i < arr.length; i++) {
+        out[i] /= sum;
+    }
+    return out;
 }
 
 /**
@@ -726,46 +697,46 @@ function softmax(arr) {
  * Architecture: Embedding -> GlobalAveragePooling1D -> Dense(64, relu) -> Dense(16, softmax)
  */
 function forward(tokens) {
-  // Embedding lookup and global average pooling combined.
-  // GlobalAveragePooling1D averages over ALL timesteps (including padding)
-  // because the trained embedding layer has mask_zero=False.
-  const pooled = new Float32Array(EMBEDDING_DIM);
+    // Embedding lookup and global average pooling combined.
+    // GlobalAveragePooling1D averages over ALL timesteps (including padding)
+    // because the trained embedding layer has mask_zero=False.
+    const pooled = new Float32Array(EMBEDDING_DIM);
 
-  for (let i = 0; i < tokens.length; i++) {
-    const tokenId = tokens[i];
-    const embOffset = tokenId * EMBEDDING_DIM;
+    for (let i = 0; i < tokens.length; i++) {
+        const tokenId = tokens[i];
+        const embOffset = tokenId * EMBEDDING_DIM;
+        for (let j = 0; j < EMBEDDING_DIM; j++) {
+            pooled[j] += weights.embedding[embOffset + j];
+        }
+    }
+
+    // Average over all timesteps (MAX_LENGTH = 100)
     for (let j = 0; j < EMBEDDING_DIM; j++) {
-      pooled[j] += weights.embedding[embOffset + j];
+        pooled[j] /= MAX_LENGTH;
     }
-  }
 
-  // Average over all timesteps (MAX_LENGTH = 100)
-  for (let j = 0; j < EMBEDDING_DIM; j++) {
-    pooled[j] /= MAX_LENGTH;
-  }
-
-  // Dense layer 1: [EMBEDDING_DIM] -> [HIDDEN_DIM] with ReLU
-  const hidden = new Float32Array(HIDDEN_DIM);
-  for (let i = 0; i < HIDDEN_DIM; i++) {
-    let sum = weights.dense1Bias[i];
-    for (let j = 0; j < EMBEDDING_DIM; j++) {
-      sum += pooled[j] * weights.dense1Kernel[j * HIDDEN_DIM + i];
+    // Dense layer 1: [EMBEDDING_DIM] -> [HIDDEN_DIM] with ReLU
+    const hidden = new Float32Array(HIDDEN_DIM);
+    for (let i = 0; i < HIDDEN_DIM; i++) {
+        let sum = weights.dense1Bias[i];
+        for (let j = 0; j < EMBEDDING_DIM; j++) {
+            sum += pooled[j] * weights.dense1Kernel[j * HIDDEN_DIM + i];
+        }
+        hidden[i] = relu(sum);
     }
-    hidden[i] = relu(sum);
-  }
 
-  // Dense layer 2: [HIDDEN_DIM] -> [NUM_LABELS]
-  const output = new Float32Array(NUM_LABELS);
-  for (let i = 0; i < NUM_LABELS; i++) {
-    let sum = weights.dense2Bias[i];
-    for (let j = 0; j < HIDDEN_DIM; j++) {
-      sum += hidden[j] * weights.dense2Kernel[j * NUM_LABELS + i];
+    // Dense layer 2: [HIDDEN_DIM] -> [NUM_LABELS]
+    const output = new Float32Array(NUM_LABELS);
+    for (let i = 0; i < NUM_LABELS; i++) {
+        let sum = weights.dense2Bias[i];
+        for (let j = 0; j < HIDDEN_DIM; j++) {
+            sum += hidden[j] * weights.dense2Kernel[j * NUM_LABELS + i];
+        }
+        output[i] = sum;
     }
-    output[i] = sum;
-  }
 
-  // Softmax (Float32Array.prototype.map / reduce / max-spread are fine here).
-  return softmax(output);
+    // Softmax (Float32Array.prototype.map / reduce / max-spread are fine here).
+    return softmax(output);
 }
 
 // Cache for computed model path
@@ -775,24 +746,24 @@ let cachedModelPath = null;
  * Get default model path based on environment
  */
 async function getDefaultModelPath() {
-  if (cachedModelPath) {
+    if (cachedModelPath) {
+        return cachedModelPath;
+    }
+
+    if (isBrowser) {
+        // In browser, model should be served from same origin
+        cachedModelPath = './model';
+        return cachedModelPath;
+    }
+
+    // Node.js - load modules first
+    await loadNodeModules();
+    // import.meta.url gives us the URL of this module
+    const __filename = _url.fileURLToPath(import.meta.url);
+    const __dirname = _path.dirname(__filename);
+    cachedModelPath = _path.join(__dirname, '..', 'model');
+
     return cachedModelPath;
-  }
-
-  if (isBrowser) {
-    // In browser, model should be served from same origin
-    cachedModelPath = "./model";
-    return cachedModelPath;
-  }
-
-  // Node.js - load modules first
-  await loadNodeModules();
-  // import.meta.url gives us the URL of this module
-  const __filename = _url.fileURLToPath(import.meta.url);
-  const __dirname = _path.dirname(__filename);
-  cachedModelPath = _path.join(__dirname, "..", "model");
-
-  return cachedModelPath;
 }
 
 /**
@@ -806,79 +777,74 @@ async function getDefaultModelPath() {
  *   increasing `loaded`; other phases fire once at completion.
  */
 export async function initialize(options = {}) {
-  if (isInitialized) return;
-  if (initPromise) return initPromise;
+    if (isInitialized) return;
+    if (initPromise) return initPromise;
 
-  // Validate modelPath option if provided
-  if (options.modelPath !== undefined) {
-    if (typeof options.modelPath !== "string") {
-      throw new Error(
-        `modelPath must be a string, got ${typeof options.modelPath}`,
-      );
+    // Validate modelPath option if provided
+    if (options.modelPath !== undefined) {
+        if (typeof options.modelPath !== 'string') {
+            throw new Error(`modelPath must be a string, got ${typeof options.modelPath}`);
+        }
+        if (options.modelPath.trim() === '') {
+            throw new Error('modelPath must not be empty');
+        }
     }
-    if (options.modelPath.trim() === "") {
-      throw new Error("modelPath must not be empty");
-    }
-  }
 
-  const onProgress =
-    typeof options.onProgress === "function" ? options.onProgress : null;
-  const pingDone = (phase, bytes) => {
-    if (onProgress) onProgress({ phase, loaded: bytes, total: bytes });
-  };
+    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+    const pingDone = (phase, bytes) => {
+        if (onProgress) onProgress({ phase, loaded: bytes, total: bytes });
+    };
 
-  initPromise = (async () => {
-    try {
-      modelBasePath = options.modelPath || (await getDefaultModelPath());
+    initPromise = (async () => {
+        try {
+            modelBasePath = options.modelPath || (await getDefaultModelPath());
 
-      // Determine path joiner based on environment
-      let joinPath;
-      if (isBrowser) {
-        joinPath = (...parts) => parts.join("/");
-      } else {
-        await loadNodeModules();
-        joinPath = (...parts) => _path.join(...parts);
-      }
+            // Determine path joiner based on environment
+            let joinPath;
+            if (isBrowser) {
+                joinPath = (...parts) => parts.join('/');
+            } else {
+                await loadNodeModules();
+                joinPath = (...parts) => _path.join(...parts);
+            }
 
-      // Load vocabulary
-      const vocabPath = joinPath(modelBasePath, "vocab.json");
-      const vocabData = await loadJson(vocabPath);
-      vocabMap = new Map();
-      vocabData.forEach((word, index) => {
-        vocabMap.set(word, index);
-      });
-      pingDone("vocab", vocabData.length);
+            // Load vocabulary
+            const vocabPath = joinPath(modelBasePath, 'vocab.json');
+            const vocabData = await loadJson(vocabPath);
+            vocabMap = new Map();
+            vocabData.forEach((word, index) => {
+                vocabMap.set(word, index);
+            });
+            pingDone('vocab', vocabData.length);
 
-      // Load labels
-      const labelsPath = joinPath(modelBasePath, "labels.json");
-      labels = await loadJson(labelsPath);
-      pingDone("labels", Object.keys(labels.id_to_label || {}).length);
+            // Load labels
+            const labelsPath = joinPath(modelBasePath, 'labels.json');
+            labels = await loadJson(labelsPath);
+            pingDone('labels', Object.keys(labels.id_to_label || {}).length);
 
-      // Load weights (streaming with progress in the browser when requested)
-      const weightsPath = joinPath(modelBasePath, "group1-shard1of1.bin");
-      const weightsData = onProgress
-        ? await loadWeightsWithProgress(weightsPath, onProgress)
-        : await loadWeights(weightsPath);
-      weights = parseWeights(weightsData);
+            // Load weights (streaming with progress in the browser when requested)
+            const weightsPath = joinPath(modelBasePath, 'group1-shard1of1.bin');
+            const weightsData = onProgress ? await loadWeightsWithProgress(weightsPath, onProgress) : await loadWeights(weightsPath);
+            weights = parseWeights(weightsData);
 
-      // Load config (optional - older models may not have it)
-      try {
-        const configPath = joinPath(modelBasePath, "config.json");
-        modelConfig = await loadJson(configPath);
-      } catch {
-        modelConfig = {};
-      }
-      pingDone("config", 1);
+            // Load config (optional - older models may not have it)
+            try {
+                const configPath = joinPath(modelBasePath, 'config.json');
+                modelConfig = await loadJson(configPath);
+            } catch {
+                modelConfig = {};
+            }
+            pingDone('config', 1);
 
-      isInitialized = true;
-    } catch (error) {
-      // Clear promise so next call can retry initialization
-      initPromise = null;
-      throw error;
-    }
-  })();
+            isInitialized = true;
+        } catch (error) {
+            // Clear promise so next call can retry initialization
+            initPromise = null;
+            throw error;
+        }
+    })();
 
-  return initPromise;
+    return initPromise;
 }
 
 /**
@@ -887,78 +853,78 @@ export async function initialize(options = {}) {
  * @returns {Promise<Object>} Classification result
  */
 export async function classify(message) {
-  await initialize();
+    await initialize();
 
-  message = sanitizeMessage(message);
+    message = sanitizeMessage(message);
 
-  // Increment AFTER initialize() + sanitize so failed inputs don't count
-  // against the in-flight tally (and can't block a pending reload()).
-  inFlightClassifies++;
-  try {
-    const tokens = tokenize(message);
-    const scores = forward(tokens);
+    // Increment AFTER initialize() + sanitize so failed inputs don't count
+    // against the in-flight tally (and can't block a pending reload()).
+    inFlightClassifies++;
+    try {
+        const tokens = tokenize(message);
+        const scores = forward(tokens);
 
-    let maxScore = 0;
-    let maxIndex = 0;
-    const allScores = {};
+        let maxScore = 0;
+        let maxIndex = 0;
+        const allScores = {};
 
-    for (let i = 0; i < scores.length; i++) {
-      const labelName = labels.id_to_label[i];
-      allScores[labelName] = scores[i];
-      if (scores[i] > maxScore) {
-        maxScore = scores[i];
-        maxIndex = i;
-      }
+        for (let i = 0; i < scores.length; i++) {
+            const labelName = labels.id_to_label[i];
+            allScores[labelName] = scores[i];
+            if (scores[i] > maxScore) {
+                maxScore = scores[i];
+                maxIndex = i;
+            }
+        }
+
+        const modelLabel = labels.id_to_label[maxIndex];
+        let label = modelLabel;
+        let usedFallback = false;
+
+        // Text patterns take priority (most reliable for specific phrases).
+        // If they don't match and the model is uncertain (or punted to "unknown"),
+        // try the SMTP-code map directly — getSmtpCodeFallback skips re-running
+        // the text patterns we already proved don't match.
+        const textFallback = getTextBasedFallback(message);
+        if (textFallback) {
+            label = textFallback;
+            usedFallback = true;
+        } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === UNKNOWN_LABEL) {
+            const codeFallback = getSmtpCodeFallback(message);
+            if (codeFallback) {
+                label = codeFallback;
+                usedFallback = true;
+            }
+        }
+
+        // `confidence` is the model's probability for the label actually
+        // returned, so a rule-picked label never inherits the score of the
+        // label it replaced. Labels the model does not know (user-registered
+        // fallbacks) get 0.
+        const result = {
+            label,
+            confidence: Object.hasOwn(allScores, label) ? allScores[label] : 0,
+            action: getAction(label),
+            scores: allScores
+        };
+
+        if (usedFallback) result.usedFallback = true;
+        if (label !== modelLabel) result.modelLabel = modelLabel;
+
+        const retryAfter = extractRetryTiming(message);
+        if (retryAfter !== null) result.retryAfter = retryAfter;
+
+        // A named DNSBL host is reported whatever the label; wording alone only
+        // when the label says the bounce was a block.
+        const blocklist = identifyBlocklist(message);
+        if (blocklist !== null && (blocklist.host || BLOCKLIST_LABELS.has(label))) {
+            result.blocklist = blocklist;
+        }
+
+        return result;
+    } finally {
+        endClassify();
     }
-
-    const modelLabel = labels.id_to_label[maxIndex];
-    let label = modelLabel;
-    let usedFallback = false;
-
-    // Text patterns take priority (most reliable for specific phrases).
-    // If they don't match and the model is uncertain (or punted to "unknown"),
-    // try the SMTP-code map directly — getSmtpCodeFallback skips re-running
-    // the text patterns we already proved don't match.
-    const textFallback = getTextBasedFallback(message);
-    if (textFallback) {
-      label = textFallback;
-      usedFallback = true;
-    } else if (maxScore < CODE_FALLBACK_THRESHOLD || label === UNKNOWN_LABEL) {
-      const codeFallback = getSmtpCodeFallback(message);
-      if (codeFallback) {
-        label = codeFallback;
-        usedFallback = true;
-      }
-    }
-
-    // `confidence` is the model's probability for the label actually
-    // returned, so a rule-picked label never inherits the score of the
-    // label it replaced. Labels the model does not know (user-registered
-    // fallbacks) get 0.
-    const result = {
-      label,
-      confidence: Object.hasOwn(allScores, label) ? allScores[label] : 0,
-      action: getAction(label),
-      scores: allScores,
-    };
-
-    if (usedFallback) result.usedFallback = true;
-    if (label !== modelLabel) result.modelLabel = modelLabel;
-
-    const retryAfter = extractRetryTiming(message);
-    if (retryAfter !== null) result.retryAfter = retryAfter;
-
-    // A named DNSBL host is reported whatever the label; wording alone only
-    // when the label says the bounce was a block.
-    const blocklist = identifyBlocklist(message);
-    if (blocklist !== null && (blocklist.host || BLOCKLIST_LABELS.has(label))) {
-      result.blocklist = blocklist;
-    }
-
-    return result;
-  } finally {
-    endClassify();
-  }
 }
 
 /**
@@ -971,25 +937,23 @@ export async function classify(message) {
  * @returns {Promise<Object[]>}
  */
 export async function classifyBatch(messages) {
-  if (!Array.isArray(messages)) {
-    throw new Error(
-      `classifyBatch: expected an array of messages, got ${typeof messages}`,
-    );
-  }
-  await initialize();
-  const results = new Array(messages.length);
-  for (let i = 0; i < messages.length; i++) {
-    try {
-      // Sequential on purpose: the first failure stops the batch and carries its index
-      // eslint-disable-next-line no-await-in-loop
-      results[i] = await classify(messages[i]);
-    } catch (err) {
-      err.index = i;
-      err.message = `classifyBatch[${i}]: ${err.message}`;
-      throw err;
+    if (!Array.isArray(messages)) {
+        throw new Error(`classifyBatch: expected an array of messages, got ${typeof messages}`);
     }
-  }
-  return results;
+    await initialize();
+    const results = new Array(messages.length);
+    for (let i = 0; i < messages.length; i++) {
+        try {
+            // Sequential on purpose: the first failure stops the batch and carries its index
+            // eslint-disable-next-line no-await-in-loop
+            results[i] = await classify(messages[i]);
+        } catch (err) {
+            err.index = i;
+            err.message = `classifyBatch[${i}]: ${err.message}`;
+            throw err;
+        }
+    }
+    return results;
 }
 
 /**
@@ -997,8 +961,8 @@ export async function classifyBatch(messages) {
  * @returns {Promise<string[]>} Array of label names
  */
 export async function getLabels() {
-  await initialize();
-  return Object.values(labels.id_to_label);
+    await initialize();
+    return Object.values(labels.id_to_label);
 }
 
 /**
@@ -1014,14 +978,14 @@ export async function getLabels() {
  *   initialized: boolean}}
  */
 export function getModelInfo() {
-  const src = isInitialized && modelConfig ? modelConfig : {};
-  return {
-    modelHash: src.model_hash ?? null,
-    trainedAt: src.trained_at ?? null,
-    trainingSamples: src.training_samples ?? null,
-    validationAccuracy: src.validation_accuracy ?? null,
-    initialized: isInitialized,
-  };
+    const src = isInitialized && modelConfig ? modelConfig : {};
+    return {
+        modelHash: src.model_hash ?? null,
+        trainedAt: src.trained_at ?? null,
+        trainingSamples: src.training_samples ?? null,
+        validationAccuracy: src.validation_accuracy ?? null,
+        initialized: isInitialized
+    };
 }
 
 /**
@@ -1029,7 +993,7 @@ export function getModelInfo() {
  * @returns {boolean}
  */
 export function isReady() {
-  return isInitialized;
+    return isInitialized;
 }
 
 /**
@@ -1039,16 +1003,16 @@ export function isReady() {
  * `clearTextFallbacks()` to remove them).
  */
 export function reset() {
-  weights = null;
-  vocabMap = null;
-  labels = null;
-  modelConfig = null;
-  isInitialized = false;
-  initPromise = null;
-  modelBasePath = null;
-  cachedModelPath = null;
-  inFlightClassifies = 0;
-  drainWaiters = [];
+    weights = null;
+    vocabMap = null;
+    labels = null;
+    modelConfig = null;
+    isInitialized = false;
+    initPromise = null;
+    modelBasePath = null;
+    cachedModelPath = null;
+    inFlightClassifies = 0;
+    drainWaiters = [];
 }
 
 /**
@@ -1066,33 +1030,33 @@ export function reset() {
  * @returns {Promise<void>}
  */
 export async function reload(options = {}) {
-  const modelPath = options.modelPath ?? modelBasePath;
-  await waitForClassifyDrain();
-  reset();
-  return initialize({ modelPath, onProgress: options.onProgress });
+    const modelPath = options.modelPath ?? modelBasePath;
+    await waitForClassifyDrain();
+    reset();
+    return initialize({ modelPath, onProgress: options.onProgress });
 }
 
 // Default export
 export default {
-  classify,
-  classifyBatch,
-  getLabels,
-  initialize,
-  isReady,
-  getModelInfo,
-  reset,
-  reload,
-  registerTextFallback,
-  clearTextFallbacks,
-  extractRetryTiming,
-  identifyBlocklist,
-  getAction,
-  extractSmtpCodes,
-  getCodeBasedFallback,
-  getTextBasedFallback,
-  ACTION_MAP,
-  BLOCKLIST_PATTERNS,
-  SMTP_CODE_MAP,
-  SMTP_MAIN_CODE_MAP,
-  CODE_FALLBACK_THRESHOLD,
+    classify,
+    classifyBatch,
+    getLabels,
+    initialize,
+    isReady,
+    getModelInfo,
+    reset,
+    reload,
+    registerTextFallback,
+    clearTextFallbacks,
+    extractRetryTiming,
+    identifyBlocklist,
+    getAction,
+    extractSmtpCodes,
+    getCodeBasedFallback,
+    getTextBasedFallback,
+    ACTION_MAP,
+    BLOCKLIST_PATTERNS,
+    SMTP_CODE_MAP,
+    SMTP_MAIN_CODE_MAP,
+    CODE_FALLBACK_THRESHOLD
 };

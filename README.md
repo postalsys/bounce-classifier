@@ -54,12 +54,12 @@ npm install @postalsys/bounce-classifier
 ### ES Modules (Browser & Node.js)
 
 ```javascript
-import { classify, initialize } from "@postalsys/bounce-classifier";
+import { classify, initialize } from '@postalsys/bounce-classifier';
 
 // Optional: pre-load the model
 await initialize();
 
-const result = await classify("550 5.1.1 User Unknown");
+const result = await classify('550 5.1.1 User Unknown');
 console.log(result.label); // 'user_unknown'
 console.log(result.confidence); // 0.95
 console.log(result.action); // 'remove'
@@ -68,11 +68,11 @@ console.log(result.action); // 'remove'
 ### CommonJS (Node.js)
 
 ```javascript
-const { classify } = require("@postalsys/bounce-classifier");
+const { classify } = require('@postalsys/bounce-classifier');
 
 async function main() {
-  const result = await classify("550 5.1.1 User Unknown");
-  console.log(result);
+    const result = await classify('550 5.1.1 User Unknown');
+    console.log(result);
 }
 
 main();
@@ -82,13 +82,13 @@ main();
 
 ```html
 <script type="module">
-  import { classify, initialize } from "./src/index.js";
+    import { classify, initialize } from './src/index.js';
 
-  // Specify model path for browser
-  await initialize({ modelPath: "./model" });
+    // Specify model path for browser
+    await initialize({ modelPath: './model' });
 
-  const result = await classify("550 5.1.1 User Unknown");
-  console.log(result);
+    const result = await classify('550 5.1.1 User Unknown');
+    console.log(result);
 </script>
 ```
 
@@ -105,14 +105,14 @@ Pre-load the model and vocabulary. Called automatically on first classification,
 await initialize();
 
 // Browser - specify model path
-await initialize({ modelPath: "./path/to/model" });
+await initialize({ modelPath: './path/to/model' });
 
 // With progress reporting (browser streams the weights file)
 await initialize({
-  modelPath: "./model",
-  onProgress: ({ phase, loaded, total }) => {
-    console.log(`${phase}: ${loaded}/${total}`);
-  },
+    modelPath: './model',
+    onProgress: ({ phase, loaded, total }) => {
+        console.log(`${phase}: ${loaded}/${total}`);
+    }
 });
 ```
 
@@ -123,7 +123,7 @@ await initialize({
 Classify a single bounce message.
 
 ```javascript
-const result = await classify("450 Greylisted, try again in 5 minutes");
+const result = await classify('450 Greylisted, try again in 5 minutes');
 // {
 //   label: 'greylisting',
 //   confidence: 0.947,
@@ -132,7 +132,7 @@ const result = await classify("450 Greylisted, try again in 5 minutes");
 //   scores: { ... }
 // }
 
-const result2 = await classify("550 blocked using zen.spamhaus.org");
+const result2 = await classify('550 blocked using zen.spamhaus.org');
 // {
 //   label: 'ip_blacklisted',
 //   confidence: 0.958,
@@ -147,11 +147,7 @@ const result2 = await classify("550 blocked using zen.spamhaus.org");
 Classify an array of bounce messages. Sequential today; the API is reserved for future vectorization. Errors on any item include `.index` identifying the failing message.
 
 ```javascript
-const results = await classifyBatch([
-  "550 5.1.1 User unknown",
-  "552 5.2.2 Over quota",
-  "421 4.7.0 Try again later",
-]);
+const results = await classifyBatch(['550 5.1.1 User unknown', '552 5.2.2 Over quota', '421 4.7.0 Try again later']);
 ```
 
 ### `registerTextFallback({ pattern, label })` / `clearTextFallbacks()`
@@ -159,14 +155,11 @@ const results = await classifyBatch([
 Add project-specific text patterns that override the built-in fallback classification. User patterns are scanned before the built-ins. Survives `reset()` / `reload()`; clear explicitly with `clearTextFallbacks()`.
 
 ```javascript
-import {
-  registerTextFallback,
-  clearTextFallbacks,
-} from "@postalsys/bounce-classifier";
+import { registerTextFallback, clearTextFallbacks } from '@postalsys/bounce-classifier';
 
 registerTextFallback({
-  pattern: /XYZZY-PROVIDER-\d+/,
-  label: "spam_blocked",
+    pattern: /XYZZY-PROVIDER-\d+/,
+    label: 'spam_blocked'
 });
 ```
 
@@ -188,7 +181,7 @@ Reload the model, optionally from a new path. Waits for any in-flight `classify(
 await reload();
 
 // Switch to a different model directory
-await reload({ modelPath: "/path/to/new-model" });
+await reload({ modelPath: '/path/to/new-model' });
 ```
 
 ### `getModelInfo(): ModelInfo`
@@ -217,27 +210,22 @@ Reset classifier state for re-initialization. Does **not** clear user-registered
 ### Low-level helpers
 
 ```javascript
-import {
-  extractRetryTiming,
-  identifyBlocklist,
-  getAction,
-  extractSmtpCodes,
-} from "@postalsys/bounce-classifier";
+import { extractRetryTiming, identifyBlocklist, getAction, extractSmtpCodes } from '@postalsys/bounce-classifier';
 
 // Extract retry timing from message
-const seconds = extractRetryTiming("try again in 5 minutes");
+const seconds = extractRetryTiming('try again in 5 minutes');
 // 300
 
 // Identify blocklists mentioned
-const blocklist = identifyBlocklist("blocked by zen.spamhaus.org");
+const blocklist = identifyBlocklist('blocked by zen.spamhaus.org');
 // { name: 'Spamhaus ZEN', type: 'ip', host: true }
 
 // Get recommended action for a label
-const action = getAction("mailbox_full");
+const action = getAction('mailbox_full');
 // 'retry'
 
 // Extract SMTP codes
-const codes = extractSmtpCodes("550 5.1.1 User unknown");
+const codes = extractSmtpCodes('550 5.1.1 User unknown');
 // { mainCode: '550', extendedCode: '5.1.1' }
 ```
 
@@ -246,15 +234,10 @@ const codes = extractSmtpCodes("550 5.1.1 User unknown");
 You can point the classifier to a different model directory, for example to use a retrained model:
 
 ```javascript
-import {
-  initialize,
-  classify,
-  reload,
-  getModelInfo,
-} from "@postalsys/bounce-classifier";
+import { initialize, classify, reload, getModelInfo } from '@postalsys/bounce-classifier';
 
 // Use a custom model at startup
-await initialize({ modelPath: "/path/to/retrained-model" });
+await initialize({ modelPath: '/path/to/retrained-model' });
 
 // Later, after retraining, reload the model without restarting
 await reload();
@@ -271,7 +254,7 @@ The model directory must contain `vocab.json`, `labels.json`, and `group1-shard1
 When the ML model has low confidence (< 50%), the classifier falls back to SMTP status code–based classification using RFC 3463 enhanced status codes. This ensures reliable classification even for messages the model hasn't seen.
 
 ```javascript
-const result = await classify("550 5.2.2 Over quota");
+const result = await classify('550 5.2.2 Over quota');
 // If ML confidence is low, uses 5.2.2 -> mailbox_full fallback
 // result.usedFallback will be true
 ```

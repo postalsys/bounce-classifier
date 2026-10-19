@@ -10,167 +10,167 @@
  * Possible bounce classification labels
  */
 export type BounceLabel =
-  | "auth_failure"
-  | "domain_blacklisted"
-  | "geo_blocked"
-  | "greylisting"
-  | "invalid_address"
-  | "ip_blacklisted"
-  | "mailbox_disabled"
-  | "mailbox_full"
-  | "policy_blocked"
-  | "rate_limited"
-  | "relay_denied"
-  | "server_error"
-  | "spam_blocked"
-  | "unknown"
-  | "user_unknown"
-  | "virus_detected";
+    | 'auth_failure'
+    | 'domain_blacklisted'
+    | 'geo_blocked'
+    | 'greylisting'
+    | 'invalid_address'
+    | 'ip_blacklisted'
+    | 'mailbox_disabled'
+    | 'mailbox_full'
+    | 'policy_blocked'
+    | 'rate_limited'
+    | 'relay_denied'
+    | 'server_error'
+    | 'spam_blocked'
+    | 'unknown'
+    | 'user_unknown'
+    | 'virus_detected';
 
 /**
  * Recommended action based on bounce category
  */
 export type BounceAction =
-  | "remove" // Permanent failure - remove from list
-  | "retry" // Temporary failure - retry later
-  | "retry_different_ip" // IP blocked - try different IP
-  | "fix_configuration" // Config issue - fix sender setup
-  | "review" // Needs manual review
-  | "remove_content"; // Content issue - remove problematic content
+    | 'remove' // Permanent failure - remove from list
+    | 'retry' // Temporary failure - retry later
+    | 'retry_different_ip' // IP blocked - try different IP
+    | 'fix_configuration' // Config issue - fix sender setup
+    | 'review' // Needs manual review
+    | 'remove_content'; // Content issue - remove problematic content
 
 /**
  * Blocklist type
  */
-export type BlocklistType = "ip" | "domain" | "uri";
+export type BlocklistType = 'ip' | 'domain' | 'uri';
 
 /**
  * Single blocklist identification result
  */
 export interface BlocklistInfo {
-  /** Name of the blocklist (e.g., 'Spamhaus ZEN', 'Barracuda') */
-  name: string;
-  /** Type of blocklist */
-  type: BlocklistType;
-  /** True when a DNSBL or lookup hostname matched, false for a wording match */
-  host: boolean;
+    /** Name of the blocklist (e.g., 'Spamhaus ZEN', 'Barracuda') */
+    name: string;
+    /** Type of blocklist */
+    type: BlocklistType;
+    /** True when a DNSBL or lookup hostname matched, false for a wording match */
+    host: boolean;
 }
 
 /**
  * Multiple blocklists identification result
  */
 export interface MultipleBlocklistInfo {
-  /** Array of identified blocklists */
-  lists: BlocklistInfo[];
-  /** True when any of the lists matched on a hostname */
-  host: boolean;
+    /** Array of identified blocklists */
+    lists: BlocklistInfo[];
+    /** True when any of the lists matched on a hostname */
+    host: boolean;
 }
 
 /**
  * Blocklist pattern definition
  */
 export interface BlocklistPattern {
-  /** Regex pattern to match */
-  pattern: RegExp;
-  /** Name of the blocklist */
-  name: string;
-  /** Type of blocklist */
-  type: BlocklistType;
-  /** Whether the pattern matches a DNSBL or lookup hostname */
-  host: boolean;
+    /** Regex pattern to match */
+    pattern: RegExp;
+    /** Name of the blocklist */
+    name: string;
+    /** Type of blocklist */
+    type: BlocklistType;
+    /** Whether the pattern matches a DNSBL or lookup hostname */
+    host: boolean;
 }
 
 /**
  * Classification result from the bounce classifier
  */
 export interface ClassificationResult {
-  /** The predicted label */
-  label: BounceLabel;
-  /**
-   * The model's probability (0-1) for the returned `label`. When a fallback
-   * rule replaced the model's pick, this is the model's score for the
-   * rule-chosen label, 0 if the model does not know that label.
-   */
-  confidence: number;
-  /**
-   * The model's own top label. Present only when a fallback rule returned a
-   * different `label`.
-   */
-  modelLabel?: BounceLabel;
-  /** Recommended action based on the label */
-  action: BounceAction;
-  /** Scores for all labels */
-  scores: Record<BounceLabel, number>;
-  /** Whether SMTP code fallback was used (present if true) */
-  usedFallback?: boolean;
-  /** Retry time in seconds (only present if timing found in message) */
-  retryAfter?: number;
-  /**
-   * Identified blocklist. Present when a DNSBL hostname is named, or when
-   * listing wording is found and the label is blocklist-related.
-   */
-  blocklist?: BlocklistInfo | MultipleBlocklistInfo;
+    /** The predicted label */
+    label: BounceLabel;
+    /**
+     * The model's probability (0-1) for the returned `label`. When a fallback
+     * rule replaced the model's pick, this is the model's score for the
+     * rule-chosen label, 0 if the model does not know that label.
+     */
+    confidence: number;
+    /**
+     * The model's own top label. Present only when a fallback rule returned a
+     * different `label`.
+     */
+    modelLabel?: BounceLabel;
+    /** Recommended action based on the label */
+    action: BounceAction;
+    /** Scores for all labels */
+    scores: Record<BounceLabel, number>;
+    /** Whether SMTP code fallback was used (present if true) */
+    usedFallback?: boolean;
+    /** Retry time in seconds (only present if timing found in message) */
+    retryAfter?: number;
+    /**
+     * Identified blocklist. Present when a DNSBL hostname is named, or when
+     * listing wording is found and the label is blocklist-related.
+     */
+    blocklist?: BlocklistInfo | MultipleBlocklistInfo;
 }
 
 /**
  * SMTP codes extraction result
  */
 export interface SmtpCodes {
-  /** Main 3-digit SMTP code (e.g., '550') */
-  mainCode: string | null;
-  /** Extended SMTP code (e.g., '5.1.1') */
-  extendedCode: string | null;
+    /** Main 3-digit SMTP code (e.g., '550') */
+    mainCode: string | null;
+    /** Extended SMTP code (e.g., '5.1.1') */
+    extendedCode: string | null;
 }
 
 /**
  * Progress event emitted during model initialization.
  */
 export interface InitProgress {
-  /** Which resource is loading. */
-  phase: "vocab" | "labels" | "weights" | "config";
-  /** Bytes loaded so far for this phase (or an opaque count for JSON phases). */
-  loaded: number;
-  /** Total bytes / units for this phase. May equal `loaded` when unknown. */
-  total: number;
+    /** Which resource is loading. */
+    phase: 'vocab' | 'labels' | 'weights' | 'config';
+    /** Bytes loaded so far for this phase (or an opaque count for JSON phases). */
+    loaded: number;
+    /** Total bytes / units for this phase. May equal `loaded` when unknown. */
+    total: number;
 }
 
 /**
  * Initialization options
  */
 export interface InitializeOptions {
-  /** Path or URL to model directory (optional, uses default if not provided) */
-  modelPath?: string;
-  /**
-   * Optional progress callback. In the browser, the "weights" phase streams
-   * the response body and fires multiple events with monotonically increasing
-   * `loaded`; other phases fire once at completion.
-   */
-  onProgress?: (progress: InitProgress) => void;
+    /** Path or URL to model directory (optional, uses default if not provided) */
+    modelPath?: string;
+    /**
+     * Optional progress callback. In the browser, the "weights" phase streams
+     * the response body and fires multiple events with monotonically increasing
+     * `loaded`; other phases fire once at completion.
+     */
+    onProgress?: (progress: InitProgress) => void;
 }
 
 /**
  * User-registered text-pattern fallback entry.
  */
 export interface TextFallbackEntry {
-  /** Regex to test against the bounce message. */
-  pattern: RegExp;
-  /** Label to assign when the pattern matches. Must be a non-empty string. */
-  label: string;
+    /** Regex to test against the bounce message. */
+    pattern: RegExp;
+    /** Label to assign when the pattern matches. Must be a non-empty string. */
+    label: string;
 }
 
 /**
  * Model metadata returned by getModelInfo()
  */
 export interface ModelInfo {
-  /** Short SHA-256 hash of the weights file (first 16 hex chars), or null for older models */
-  modelHash: string | null;
-  /** ISO 8601 UTC timestamp of when the model was trained, or null */
-  trainedAt: string | null;
-  /** Number of training samples used, or null */
-  trainingSamples: number | null;
-  /** Validation accuracy from training (0-1), or null */
-  validationAccuracy: number | null;
-  /** Whether the classifier has been initialized. Metadata fields are null if false. */
-  initialized: boolean;
+    /** Short SHA-256 hash of the weights file (first 16 hex chars), or null for older models */
+    modelHash: string | null;
+    /** ISO 8601 UTC timestamp of when the model was trained, or null */
+    trainedAt: string | null;
+    /** Number of training samples used, or null */
+    trainingSamples: number | null;
+    /** Validation accuracy from training (0-1), or null */
+    validationAccuracy: number | null;
+    /** Whether the classifier has been initialized. Metadata fields are null if false. */
+    initialized: boolean;
 }
 
 /**
@@ -218,9 +218,7 @@ export function classify(message: string): Promise<ClassificationResult>;
  * reserved for future vectorization. Per-item errors include an `.index`
  * property identifying the failing message.
  */
-export function classifyBatch(
-  messages: string[],
-): Promise<ClassificationResult[]>;
+export function classifyBatch(messages: string[]): Promise<ClassificationResult[]>;
 
 /**
  * Register a custom text-pattern fallback. User-registered patterns are
@@ -281,9 +279,7 @@ export function extractRetryTiming(message: string): number | null;
  * @param message - The bounce message
  * @returns Blocklist info, or null if not found
  */
-export function identifyBlocklist(
-  message: string,
-): BlocklistInfo | MultipleBlocklistInfo | null;
+export function identifyBlocklist(message: string): BlocklistInfo | MultipleBlocklistInfo | null;
 
 /**
  * Get recommended action based on bounce category. Unknown categories
@@ -318,27 +314,27 @@ export function getTextBasedFallback(message: string): BounceLabel | null;
  * Default export with all functions and constants
  */
 declare const bounceClassifier: {
-  classify: typeof classify;
-  classifyBatch: typeof classifyBatch;
-  getLabels: typeof getLabels;
-  initialize: typeof initialize;
-  isReady: typeof isReady;
-  getModelInfo: typeof getModelInfo;
-  reset: typeof reset;
-  reload: typeof reload;
-  registerTextFallback: typeof registerTextFallback;
-  clearTextFallbacks: typeof clearTextFallbacks;
-  extractRetryTiming: typeof extractRetryTiming;
-  identifyBlocklist: typeof identifyBlocklist;
-  getAction: typeof getAction;
-  extractSmtpCodes: typeof extractSmtpCodes;
-  getCodeBasedFallback: typeof getCodeBasedFallback;
-  getTextBasedFallback: typeof getTextBasedFallback;
-  ACTION_MAP: typeof ACTION_MAP;
-  BLOCKLIST_PATTERNS: typeof BLOCKLIST_PATTERNS;
-  SMTP_CODE_MAP: typeof SMTP_CODE_MAP;
-  SMTP_MAIN_CODE_MAP: typeof SMTP_MAIN_CODE_MAP;
-  CODE_FALLBACK_THRESHOLD: typeof CODE_FALLBACK_THRESHOLD;
+    classify: typeof classify;
+    classifyBatch: typeof classifyBatch;
+    getLabels: typeof getLabels;
+    initialize: typeof initialize;
+    isReady: typeof isReady;
+    getModelInfo: typeof getModelInfo;
+    reset: typeof reset;
+    reload: typeof reload;
+    registerTextFallback: typeof registerTextFallback;
+    clearTextFallbacks: typeof clearTextFallbacks;
+    extractRetryTiming: typeof extractRetryTiming;
+    identifyBlocklist: typeof identifyBlocklist;
+    getAction: typeof getAction;
+    extractSmtpCodes: typeof extractSmtpCodes;
+    getCodeBasedFallback: typeof getCodeBasedFallback;
+    getTextBasedFallback: typeof getTextBasedFallback;
+    ACTION_MAP: typeof ACTION_MAP;
+    BLOCKLIST_PATTERNS: typeof BLOCKLIST_PATTERNS;
+    SMTP_CODE_MAP: typeof SMTP_CODE_MAP;
+    SMTP_MAIN_CODE_MAP: typeof SMTP_MAIN_CODE_MAP;
+    CODE_FALLBACK_THRESHOLD: typeof CODE_FALLBACK_THRESHOLD;
 };
 
 export default bounceClassifier;
