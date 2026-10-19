@@ -24,21 +24,27 @@
   ],
   "scripts": {
     "build": "node build.js",
-    "format": "prettier --write .",
+    "test": "node --test test/test.js",
+    "test:coverage": "c8 npm test",
     "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "update-model": "node scripts/update-model.js",
-    "prepublishOnly": "npm run update-model && npm run build",
-    "test": "node --test test/test.js"
+    "update": "rm -rf node_modules package-lock.json && ncu -u && npm install",
+    "prepublishOnly": "npm run update-model && npm run build"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "esbuild": "^0.28.2",
-    "eslint": "^10.11.0",
-    "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.9.9"
+    "@eslint/js": "10.0.1",
+    "c8": "12.0.0",
+    "esbuild": "0.28.2",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "prettier": "3.9.10"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "repository": {
     "type": "git",
