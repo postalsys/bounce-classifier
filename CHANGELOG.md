@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/postalsys/bounce-classifier/compare/v3.0.1...v3.0.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* report the model probability of the returned label as confidence ([f469c5b](https://github.com/postalsys/bounce-classifier/commit/f469c5b738a577381cb09231831468d51f36e8fc))
+
 ## [3.0.1](https://github.com/postalsys/bounce-classifier/compare/v3.0.0...v3.0.1) (2026-09-28)
 
 
