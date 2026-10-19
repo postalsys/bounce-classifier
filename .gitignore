@@ -29,5 +29,4 @@ coverage/
 *.temp
 
 # Claude Code
-CLAUDE.md
 .claude/
