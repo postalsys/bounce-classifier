@@ -628,6 +628,8 @@ async function loadWeightsWithProgress(filePath, onProgress) {
       const chunks = [];
       let loaded = 0;
       for (;;) {
+        // Stream chunks arrive in order, one read at a time
+        // eslint-disable-next-line no-await-in-loop
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value);
@@ -978,6 +980,8 @@ export async function classifyBatch(messages) {
   const results = new Array(messages.length);
   for (let i = 0; i < messages.length; i++) {
     try {
+      // Sequential on purpose: the first failure stops the batch and carries its index
+      // eslint-disable-next-line no-await-in-loop
       results[i] = await classify(messages[i]);
     } catch (err) {
       err.index = i;
