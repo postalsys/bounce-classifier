@@ -26,6 +26,8 @@
         "build": "node build.js",
         "test": "node --test test/test.js",
         "test:coverage": "c8 npm test",
+        "pretest:cjs": "npm run build",
+        "test:cjs": "NODE_OPTIONS=--no-experimental-require-module node test/cjs-smoke.cjs",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write .",

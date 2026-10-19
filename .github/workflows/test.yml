@@ -34,6 +34,12 @@ jobs:
             - run: npm test
             # EmailEngine and other CommonJS consumers load the esbuild bundle
             - name: Check the CommonJS build
+              if: matrix.node == '20.x'
               run: |
                   npm run build
-                  node -e "const b = require('./dist/index.cjs'); b.initialize().then(() => b.classify('550 5.1.1 User unknown')).then(r => { if (r.label !== 'user_unknown') { throw new Error('unexpected label ' + r.label); } })"
+                  node test/cjs-smoke.cjs
+            # pkg snapshots a CommonJS module graph, and Node 22+ hides ES modules behind require(esm).
+            # Load the bundle with that switched off so an ES module in the graph fails here.
+            - name: Check the CommonJS build with require(esm) disabled
+              if: matrix.node != '20.x'
+              run: npm run test:cjs
