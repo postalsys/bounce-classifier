@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/postalsys/bounce-classifier/compare/v3.0.2...v3.1.0) (2026-10-19)
+
+
+### Features
+
+* migrate to TypeScript with ES module and CommonJS builds ([10a8c59](https://github.com/postalsys/bounce-classifier/commit/10a8c59a5ecc1a8f07e5cf0b233ef1b8367d04a6))
+
 ## [3.0.2](https://github.com/postalsys/bounce-classifier/compare/v3.0.1...v3.0.2) (2026-09-28)
 
 
