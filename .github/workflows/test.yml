@@ -4,20 +4,36 @@ on:
     push:
     pull_request:
 
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
 jobs:
     test:
         strategy:
             matrix:
-                node: [22.x, 24.x]
+                node: [20.x, 22.x, 24.x]
                 os: [ubuntu-latest]
         runs-on: ${{ matrix.os }}
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v6
             - name: Use Node.js ${{ matrix.node }}
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v6
               with:
                   node-version: ${{ matrix.node }}
+                  cache: npm
             - run: npm ci
+            - run: npm run lint
+            - run: npm run format:check
+            # The model is not tracked in git, the suite needs the published one
             - name: Download model
               run: npm run update-model
             - run: npm test
+            # EmailEngine and other CommonJS consumers load the esbuild bundle
+            - name: Check the CommonJS build
+              run: |
+                  npm run build
+                  node -e "const b = require('./dist/index.cjs'); b.initialize().then(() => b.classify('550 5.1.1 User unknown')).then(r => { if (r.label !== 'user_unknown') { throw new Error('unexpected label ' + r.label); } })"
