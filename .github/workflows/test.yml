@@ -18,6 +18,7 @@ jobs:
                 node: [20.x, 22.x, 24.x, latest]
                 os: [ubuntu-latest]
         runs-on: ${{ matrix.os }}
+        timeout-minutes: 10
         steps:
             - uses: actions/checkout@v7
             - name: Use Node.js ${{ matrix.node }}
@@ -25,21 +26,22 @@ jobs:
               with:
                   node-version: ${{ matrix.node }}
                   cache: npm
+            # npm ci builds dist/ through the prepare script
             - run: npm ci
+            # Type-checks the sources and tests, then ESLint
             - run: npm run lint
             - run: npm run format:check
             # The model is not tracked in git, the suite needs the published one
             - name: Download model
               run: npm run update-model
+            # Builds, then runs the sources (through tsx) and the built package (test/package/)
             - run: npm test
-            # EmailEngine and other CommonJS consumers load the esbuild bundle
+            # EmailEngine and other CommonJS consumers load dist/cjs
             - name: Check the CommonJS build
               if: matrix.node == '20.x'
-              run: |
-                  npm run build
-                  node test/cjs-smoke.cjs
+              run: node test/package/cjs-smoke.cjs
             # pkg snapshots a CommonJS module graph, and Node 22+ hides ES modules behind require(esm).
-            # Load the bundle with that switched off so an ES module in the graph fails here.
+            # Load the build with that switched off so an ES module in the graph fails here.
             - name: Check the CommonJS build with require(esm) disabled
               if: matrix.node != '20.x'
               run: npm run test:cjs

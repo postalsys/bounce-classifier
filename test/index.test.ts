@@ -33,6 +33,7 @@ import {
     BLOCKLIST_PATTERNS,
     CODE_FALLBACK_THRESHOLD
 } from '../src/index.js';
+import type { BlocklistInfo, BounceAction, BounceLabel, InitProgress } from '../src/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MODEL_DIR = resolve(__dirname, '..', 'model');
@@ -41,7 +42,7 @@ const MODEL_DIR = resolve(__dirname, '..', 'model');
  * Build a temporary model dir that mirrors `model/`, with config.json
  * replaced by the supplied object. Returns { path, cleanup }.
  */
-function makeTmpModel(configOverride) {
+function makeTmpModel(configOverride: Record<string, unknown>): { path: string; cleanup: () => void } {
     const tmp = mkdtempSync(join(tmpdir(), 'bounce-test-'));
     for (const file of readdirSync(MODEL_DIR)) {
         if (file === 'config.json') continue;
@@ -143,35 +144,35 @@ describe('Helper Functions', () => {
 
     describe('identifyBlocklist', () => {
         it('should identify Spamhaus', () => {
-            const result = identifyBlocklist('Blocked by spamhaus.org');
+            const result: any = identifyBlocklist('Blocked by spamhaus.org');
             assert.strictEqual(result.name, 'Spamhaus');
             assert.strictEqual(result.type, 'ip');
         });
 
         it('should identify Spamhaus ZEN', () => {
-            const result = identifyBlocklist('Listed in zen.spamhaus.org');
+            const result: any = identifyBlocklist('Listed in zen.spamhaus.org');
             // May return lists array when multiple patterns match (zen + spamhaus)
             const name = result.name || (result.lists && result.lists[0]?.name);
             assert.ok(name === 'Spamhaus ZEN' || name === 'Spamhaus', `Expected Spamhaus ZEN or Spamhaus, got: ${name}`);
         });
 
         it('should identify Barracuda', () => {
-            const result = identifyBlocklist('Blocked by Barracuda');
+            const result: any = identifyBlocklist('Blocked by Barracuda');
             assert.strictEqual(result.name, 'Barracuda');
         });
 
         it('should identify SpamCop', () => {
-            const result = identifyBlocklist('Listed in spamcop.net');
+            const result: any = identifyBlocklist('Listed in spamcop.net');
             assert.strictEqual(result.name, 'SpamCop');
         });
 
         it('should identify SORBS', () => {
-            const result = identifyBlocklist('Blocked by dnsbl.sorbs.net');
+            const result: any = identifyBlocklist('Blocked by dnsbl.sorbs.net');
             assert.strictEqual(result.name, 'SORBS');
         });
 
         it('should identify generic RBL', () => {
-            const result = identifyBlocklist('IP listed in RBL');
+            const result: any = identifyBlocklist('IP listed in RBL');
             assert.strictEqual(result.name, 'RBL');
         });
 
@@ -180,31 +181,31 @@ describe('Helper Functions', () => {
         });
 
         it('should identify multiple blocklists', () => {
-            const result = identifyBlocklist('Blocked by spamhaus.org and barracuda');
+            const result: any = identifyBlocklist('Blocked by spamhaus.org and barracuda');
             assert.ok(result.lists);
             assert.strictEqual(result.lists.length, 2);
         });
 
         it('should identify URIBL', () => {
-            const result = identifyBlocklist('URL blocked by uribl.com');
+            const result: any = identifyBlocklist('URL blocked by uribl.com');
             assert.strictEqual(result.name, 'URIBL');
             assert.strictEqual(result.type, 'uri');
         });
 
         it('should identify Spamhaus DBL as domain type', () => {
-            const result = identifyBlocklist('Domain in dbl.spamhaus.org');
+            const result: any = identifyBlocklist('Domain in dbl.spamhaus.org');
             // May return lists array when multiple patterns match (dbl + spamhaus)
             const entry = result.lists ? result.lists[0] : result;
             assert.ok(entry.name === 'Spamhaus DBL' || entry.name === 'Spamhaus', `Expected Spamhaus DBL or Spamhaus, got: ${entry.name}`);
         });
 
         it('should identify Cloudmark', () => {
-            const result = identifyBlocklist('Blocked by Cloudmark');
+            const result: any = identifyBlocklist('Blocked by Cloudmark');
             assert.strictEqual(result.name, 'Cloudmark');
         });
 
         it('should identify Proofpoint', () => {
-            const result = identifyBlocklist('521 5.7.1 Service unavailable; client [192.0.2.1] blocked using prs.proofpoint.com');
+            const result: any = identifyBlocklist('521 5.7.1 Service unavailable; client [192.0.2.1] blocked using prs.proofpoint.com');
             assert.strictEqual(result.name, 'Proofpoint');
         });
 
@@ -222,16 +223,16 @@ describe('Helper Functions', () => {
         });
 
         it('should identify vendor lookup hostnames', () => {
-            assert.strictEqual(identifyBlocklist('554 Client host [192.0.2.1] blocked using b.barracudacentral.org').name, 'Barracuda');
+            assert.strictEqual((identifyBlocklist('554 Client host [192.0.2.1] blocked using b.barracudacentral.org') as BlocklistInfo).name, 'Barracuda');
             assert.strictEqual(
-                identifyBlocklist('550 5.7.1 Poor Reputation Sender. - https://csi.cloudmark.com/reset-request/?ip=192.0.2.1').name,
+                (identifyBlocklist('550 5.7.1 Poor Reputation Sender. - https://csi.cloudmark.com/reset-request/?ip=192.0.2.1') as BlocklistInfo).name,
                 'Cloudmark'
             );
         });
 
         it('should report whether a DNSBL hostname matched', () => {
-            assert.strictEqual(identifyBlocklist('blocked using b.barracudacentral.org').host, true);
-            assert.strictEqual(identifyBlocklist('Blocked by Mimecast').host, false);
+            assert.strictEqual(identifyBlocklist('blocked using b.barracudacentral.org')?.host, true);
+            assert.strictEqual(identifyBlocklist('Blocked by Mimecast')?.host, false);
             assert.deepStrictEqual(identifyBlocklist('rejected, listed on rbl.example.org'), { name: 'RBL', type: 'ip', host: true });
             assert.deepStrictEqual(identifyBlocklist('Your IP is listed in an RBL'), {
                 name: 'RBL',
@@ -243,37 +244,37 @@ describe('Helper Functions', () => {
         });
 
         it('should identify Mimecast', () => {
-            const result = identifyBlocklist('Blocked by Mimecast');
+            const result: any = identifyBlocklist('Blocked by Mimecast');
             assert.strictEqual(result.name, 'Mimecast');
         });
 
         it('should identify Invaluement', () => {
-            const result = identifyBlocklist('Listed in invaluement');
+            const result: any = identifyBlocklist('Listed in invaluement');
             assert.strictEqual(result.name, 'Invaluement');
         });
 
         it('should identify Trend Micro', () => {
-            const result = identifyBlocklist('Blocked by Trend Micro');
+            const result: any = identifyBlocklist('Blocked by Trend Micro');
             assert.strictEqual(result.name, 'Trend Micro');
         });
 
         it('should identify generic DNSBL', () => {
-            const result = identifyBlocklist('IP listed in DNSBL');
+            const result: any = identifyBlocklist('IP listed in DNSBL');
             assert.strictEqual(result.name, 'DNSBL');
         });
 
         it('should identify Spamhaus SBL', () => {
-            const result = identifyBlocklist('Listed in SBL');
+            const result: any = identifyBlocklist('Listed in SBL');
             assert.strictEqual(result.name, 'Spamhaus SBL');
         });
 
         it('should identify Spamhaus XBL', () => {
-            const result = identifyBlocklist('Listed in XBL');
+            const result: any = identifyBlocklist('Listed in XBL');
             assert.strictEqual(result.name, 'Spamhaus XBL');
         });
 
         it('should identify Spamhaus PBL', () => {
-            const result = identifyBlocklist('Listed in PBL');
+            const result: any = identifyBlocklist('Listed in PBL');
             assert.strictEqual(result.name, 'Spamhaus PBL');
         });
     });
@@ -405,7 +406,7 @@ describe('Helper Functions', () => {
             const expectedActions = ['remove', 'retry', 'retry_different_ip', 'fix_configuration', 'review', 'remove_content'];
             const actions = Object.values(ACTION_MAP);
             for (const action of expectedActions) {
-                assert.ok(actions.includes(action), `Missing action: ${action}`);
+                assert.ok(actions.includes(action as BounceAction), `Missing action: ${action}`);
             }
         });
 
@@ -429,7 +430,7 @@ describe('Helper Functions', () => {
                 'unknown'
             ];
             for (const category of expectedCategories) {
-                assert.ok(ACTION_MAP[category] !== undefined, `Missing action for: ${category}`);
+                assert.ok(ACTION_MAP[category as BounceLabel] !== undefined, `Missing action for: ${category}`);
             }
         });
     });
@@ -540,15 +541,15 @@ describe('Classifier', () => {
                 'virus_detected'
             ];
             for (const label of expectedLabels) {
-                assert.ok(labels.includes(label), `Missing label: ${label}`);
+                assert.ok(labels.includes(label as BounceLabel), `Missing label: ${label}`);
             }
         });
     });
 
     describe('classify', () => {
         it('should throw error for non-string input', async () => {
-            await assert.rejects(async () => classify(null), /must be a non-empty string/);
-            await assert.rejects(async () => classify(123), /must be a string, got number/);
+            await assert.rejects(async () => classify(null as any), /must be a non-empty string/);
+            await assert.rejects(async () => classify(123 as any), /must be a string, got number/);
             await assert.rejects(async () => classify(''), /must not be empty or whitespace-only/);
         });
 
@@ -780,7 +781,8 @@ describe('Classifier', () => {
             const result = await classify('550 Blocked by zen.spamhaus.org');
             assert.ok(result.blocklist);
             // May return lists array when multiple patterns match
-            const name = result.blocklist.name || (result.blocklist.lists && result.blocklist.lists[0]?.name);
+            const blocklist: any = result.blocklist;
+            const name = blocklist.name || (blocklist.lists && blocklist.lists[0]?.name);
             assert.ok(name === 'Spamhaus ZEN' || name === 'Spamhaus', `Expected Spamhaus blocklist, got: ${name}`);
         });
 
@@ -1106,12 +1108,12 @@ describe('classifyBatch', () => {
     });
 
     it('should throw on non-array input', async () => {
-        await assert.rejects(async () => classifyBatch('not an array'), /expected an array/);
-        await assert.rejects(async () => classifyBatch(null), /expected an array/);
+        await assert.rejects(async () => classifyBatch('not an array' as any), /expected an array/);
+        await assert.rejects(async () => classifyBatch(null as any), /expected an array/);
     });
 
     it('should surface per-item error with .index', async () => {
-        let caught;
+        let caught: any;
         try {
             await classifyBatch(['valid message', '', 'also valid']);
         } catch (err) {
@@ -1150,7 +1152,7 @@ describe('registerTextFallback / clearTextFallbacks', () => {
     it('should report the model score of an overriding fallback label', async () => {
         const msg = '550 5.1.1 The email account that you tried to reach does not exist';
         const baseline = await classify(msg);
-        const override = Object.keys(baseline.scores).find(l => l !== baseline.label);
+        const override = (Object.keys(baseline.scores) as BounceLabel[]).find(l => l !== baseline.label)!;
         registerTextFallback({ pattern: /tried to reach/, label: override });
         const result = await classify(msg);
         assert.strictEqual(result.label, override);
@@ -1187,9 +1189,9 @@ describe('registerTextFallback / clearTextFallbacks', () => {
     });
 
     it('should reject invalid patterns', () => {
-        assert.throws(() => registerTextFallback({ pattern: 'not a regex', label: 'unknown' }), /pattern must be a RegExp/);
+        assert.throws(() => registerTextFallback({ pattern: 'not a regex' as any, label: 'unknown' }), /pattern must be a RegExp/);
         assert.throws(() => registerTextFallback({ pattern: /x/, label: '' }), /label must be a non-empty string/);
-        assert.throws(() => registerTextFallback(null), /expected \{ pattern, label \} object/);
+        assert.throws(() => registerTextFallback(null as any), /expected \{ pattern, label \} object/);
     });
 
     it('should restore built-in behavior after clearTextFallbacks', () => {
@@ -1206,11 +1208,11 @@ describe('initialize onProgress', () => {
     });
 
     it('should fire progress events for each phase', async () => {
-        const events = [];
+        const events: InitProgress[] = [];
         await initialize({ onProgress: p => events.push(p) });
         const phases = new Set(events.map(e => e.phase));
         // All four phases should be seen at least once.
-        for (const expected of ['vocab', 'labels', 'weights', 'config']) {
+        for (const expected of ['vocab', 'labels', 'weights', 'config'] as const) {
             assert.ok(phases.has(expected), `missing phase: ${expected}`);
         }
         // Every event has the expected shape.

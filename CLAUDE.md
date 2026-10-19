@@ -5,50 +5,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test                  # node --test test/test.js (needs the model, see below)
-npm run test:coverage     # c8 npm test
-npm run lint              # eslint .
+npm run build             # scripts/build.js: tsc into dist/esm and dist/cjs (also runs on install via `prepare`)
+npm test                  # build, then node --test (through tsx) over test/**/*.test.ts (needs the model, see below)
+npm run test:coverage     # the same under c8 (.c8rc.json)
+npm run test:cjs          # build, then load dist/cjs with require(esm) disabled (needs the model)
+npm run typecheck         # tsc -p tsconfig.json (sources and tests, no emit)
+npm run lint              # typecheck, then eslint .
 npm run lint:fix          # eslint . --fix
 npm run format            # prettier --write .
 npm run format:check      # prettier --check .
-npm run build             # esbuild: src/index.js -> dist/index.cjs (CommonJS bundle)
-npm run test:cjs          # build, then load dist/index.cjs with require(esm) disabled (needs the model)
 npm run update-model      # download the latest model from bounces.postalsys.com into model/
 npm run update            # rm -rf node_modules package-lock.json && ncu -u && npm install
 ```
 
-Run a single test by name (Node's built-in test runner, `node:assert/strict` style assertions):
+Run a single test by name (Node's built-in test runner, `node:assert` style assertions):
 
 ```bash
-node --test --test-name-pattern="classifyBatch" test/test.js
+node --import tsx --test --test-name-pattern="classifyBatch" test/index.test.ts
 ```
 
 The `model/` directory is not tracked in git (`.gitignore`). Run `npm run update-model` once before `npm test`; CI, the Pages deploy and `prepublishOnly` all download it fresh. Set `BOUNCE_TRAINER_URL` to fetch from a different trainer instance.
 
 ## Architecture
 
-A single ESM module, `src/index.js`, that classifies SMTP bounce text into 16 labels and maps each label to an action (`ACTION_MAP`). It has no runtime dependencies and runs in both Node.js and the browser. `src/index.d.ts` holds the hand-written types; keep it in step with the exports.
+Written in TypeScript and published as a dual package: ES modules in `dist/esm/` and CommonJS in `dist/cjs/`, each with generated type declarations. The layout follows `../pubface` (and `../nodemailer` / `../imapflow` before it). It classifies SMTP bounce text into 16 labels and maps each label to an action (`ACTION_MAP`). It has no runtime dependencies and runs in both Node.js and the browser.
 
-- **Model loading.** `initialize()` loads `vocab.json`, `labels.json`, `group1-shard1of1.bin` (raw Float32 weights) and the optional `config.json` from `model/` (resolved relative to the module via `import.meta.url`, or `./model` in the browser, or `options.modelPath`). Initialization is memoised through `initPromise` and cleared on failure so a later call can retry. `reload()` waits for in-flight `classify()` calls to drain before swapping the model.
+- **`src/index.ts`** is the whole library, public types included (the declarations are generated from it; there is no hand-written `.d.ts`). **`src/model-location.ts`** exports `defaultModelUrl`, the URL of `model/` at the package root.
+- **Model loading.** `initialize()` loads `vocab.json`, `labels.json`, `group1-shard1of1.bin` (raw Float32 weights) and the optional `config.json` from `model/` (the default `defaultModelUrl` in Node, `./model` in the browser, or `options.modelPath`). Initialization is memoised through `initPromise` and cleared on failure so a later call can retry. `reload()` waits for in-flight `classify()` calls to drain before swapping the model.
 - **Inference.** Pure JavaScript forward pass (`tokenize()` -> embedding with average pooling -> dense layer with ReLU -> dense layer -> softmax) in `forward()`. Input is capped (`MAX_MESSAGE_LENGTH`, `MAX_LENGTH` tokens). No TensorFlow at runtime; `docs/inference.md` documents the weight layout.
 - **Rule layer on top of the model.** Text patterns (`getTextBasedFallback()`, extendable with `registerTextFallback()`) override the model label; when the model is unsure (`CODE_FALLBACK_THRESHOLD`) or says `unknown`, the SMTP code maps (`SMTP_CODE_MAP`, `SMTP_MAIN_CODE_MAP`) decide. `confidence` is always the model's probability for the label actually returned (0 for labels the model does not know). `extractRetryTiming()` and `identifyBlocklist()` (`BLOCKLIST_PATTERNS`) enrich the result.
-- **Dual package.** `exports` maps `import` to `src/index.js` and `require` to `dist/index.cjs`. `build.js` bundles with esbuild, shims `import.meta.url`, and rewrites the lazy `await import("fs"|"path"|"url")` calls into static requires so `pkg` can trace them. `dist/` is build output, not tracked, and is produced on publish.
-- `example/index.html` is the browser demo deployed to GitHub Pages by `.github/workflows/pages.yml`. `Classifier.md` is the end-to-end technical overview (training and inference); the trainer itself lives elsewhere (bounces.postalsys.com).
+- **Build.** `scripts/build.js` runs `tsc` with `tsconfig.esm.json` and `tsconfig.cjs.json`, writes a `package.json` pinning the module format into each output directory, and replaces `model-location.js` in both: the model is two levels above `dist/<format>/`, and the CommonJS output resolves it from `__dirname` because it can not use `import.meta.url`. The CommonJS output is otherwise used as tsc emits it: `require()` returns the named exports plus `default`, as the old esbuild bundle did. `dist/` is build output, not tracked.
+- **Exports map.** `.` (`import` -> `dist/esm/index.js`, `require` -> `dist/cjs/index.js`), `./model/*` and `./package.json`. `module` points at the ES module build for bundlers.
+- `example/index.html` is the browser demo, importing `../dist/esm/index.js`; `.github/workflows/pages.yml` deploys it with `dist/` and `model/` to GitHub Pages. `Classifier.md` is the end-to-end technical overview (training and inference); the trainer itself lives elsewhere (bounces.postalsys.com).
+
+## Module format
+
+- Every file in `src/` compiles both ways, so code there must not use `require`, `module`, `exports`, `__dirname`, `__filename`, top-level `await` or JSON imports. `import.meta` is allowed only in `src/model-location.ts`, which the build replaces.
+- Node built-ins are loaded lazily with `await import('fs' | 'path' | 'url')` inside `nodeModules()`, never imported statically: the ES module build is what the browser loads, and its static import graph must stay free of Node built-ins (`test/package/package.test.ts` checks it). The CommonJS build compiles those calls to `require()`, which pkg can trace. The bare specifiers (no `node:` prefix) are kept for browser bundlers.
+- `erasableSyntaxOnly` is on: no enums, no namespaces with runtime code, no parameter properties. Relative imports carry the `.js` extension.
+- Optional properties of public input interfaces are declared with an explicit `| undefined`, so consumers compiling with `exactOptionalPropertyTypes` can pass a value that may be undefined.
+- `@types/node` stays on the 20.x line and `typescript` on 6.x (`.ncurc.cjs`).
 
 ## Critical constraints
 
-- **EmailEngine consumes the CommonJS build.** `../emailengine/server.js` does `require('@postalsys/bounce-classifier')` (so it gets `dist/index.cjs`), calls `initialize()` at startup and `classify()` per bounce, and its `pkg` config ships `node_modules/@postalsys/bounce-classifier/model/**/*` as assets. Keep the `require` export working, keep the model in `model/` next to `dist/`, keep the Node built-ins loadable without dynamic `import()` in the bundle, and do not add runtime dependencies (especially ESM-only or native ones). See Platform constraints below.
-- **Browser compatibility.** `src/index.js` must keep running in the browser: Node modules are loaded lazily and only when `isBrowser` is false.
+- **EmailEngine consumes the CommonJS build.** `../emailengine/server.js` does `require('@postalsys/bounce-classifier')` (so it gets `dist/cjs/index.js`), calls `initialize()` at startup (passed detached to `.then()`) and `classify()` per bounce, and its `pkg` config ships `node_modules/@postalsys/bounce-classifier/model/**/*` as assets. Keep the `require` export working, keep the model in `model/` at the package root, keep the Node built-ins loadable without dynamic `import()` in the CommonJS build, and do not add runtime dependencies (especially ESM-only or native ones). See Platform constraints below.
+- **Browser compatibility.** `dist/esm/` must keep running in the browser: Node modules are loaded lazily and only when `isBrowser` is false.
 - **Releases are automated via release-please.** Version in `package.json` and `CHANGELOG.md` are owned by the bot; do not bump them by hand. The publish job downloads the latest model and builds before `npm publish`, so each release ships whatever model the trainer serves at that moment.
 
 ## Platform constraints
 
 Both rules come from EmailEngine, which ships as a `@yao-pkg/pkg` binary: pkg snapshots a CommonJS module graph and cannot load ES modules.
 
-- **Node.js 20 is the minimum supported version.** Runtime code, tests and tooling must work on Node 20, 22 and 24 (`engines.node` is `>=20.0.0`, and `build.js` targets `node20`).
-- **What EmailEngine loads must be genuinely CommonJS.** The source is ESM by design; what reaches the binary is `dist/index.cjs` plus `model/**`. The esbuild bundle has to inline everything, so at runtime it `require()`s Node built-ins only and contains no dynamic `import()`. Node 22+ (and 20.19) can `require()` an ES module by default, which would hide a regression until the pkg binary fails. A CommonJS entry that only wraps a dynamic `import()` does not count.
-- **Check:** `npm run test:cjs` builds, then `test/cjs-smoke.cjs` requires the package by name with `NODE_OPTIONS=--no-experimental-require-module`, asserts the bundle loads only built-ins, and classifies a sample bounce. CI runs it on Node 22 and 24 (Node 20 loads the bundle without the flag).
-- Never add an ESM-only runtime dependency (ideally none at all). If a dev dependency's next major is ESM-only or needs more than Node 20, pin the last working major in `.ncurc.js` (`reject`, or a `target` of `minor`/`patch`) with a comment giving the reason.
+- **Node.js 20 is the minimum supported version.** Runtime code, tests and tooling must work on Node 20, 22 and 24 (`engines.node` is `>=20.0.0`, and tsc targets ES2022).
+- **What EmailEngine loads must be genuinely CommonJS.** What reaches the binary is `dist/cjs/` plus `model/**`. At runtime it `require()`s Node built-ins and its own files only and contains no dynamic `import()`. Node 22+ (and 20.19) can `require()` an ES module by default, which would hide a regression until the pkg binary fails. A CommonJS entry that only wraps a dynamic `import()` does not count.
+- **Check:** `npm run test:cjs` builds, then `test/package/cjs-smoke.cjs` requires the package by name with `NODE_OPTIONS=--no-experimental-require-module`, asserts `dist/cjs/` loads only built-ins and its own files, and classifies a sample bounce from the default model location the way EmailEngine calls it. CI runs it on Node 22 and later (Node 20 runs the smoke test without the flag). `test/package/package.test.ts` covers the exports map, the packed file list, both builds' module shape and default model path, and the generated declarations.
+- Never add an ESM-only runtime dependency (ideally none at all). If a dev dependency's next major is ESM-only or needs more than Node 20, pin the last working major in `.ncurc.cjs` (`reject`, or a `target` of `minor`/`patch`) with a comment giving the reason.
 
 ## Conventions
 
@@ -69,7 +80,7 @@ These mirror the conventions used across Postal Systems projects (see `../emaile
 **Before committing code changes**
 
 1. `npm run format` and `npm run lint`
-2. `npm test` (and `npm run test:cjs` if `src/` or `build.js` changed)
+2. `npm test` (and `npm run test:cjs` if `src/` or `scripts/build.js` changed)
 3. For non-trivial changes, consider `/simplify` and `/security-review`.
 
 **After pushing**

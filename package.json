@@ -5,45 +5,50 @@
     "author": "Andris Reinman",
     "license": "MIT",
     "type": "module",
-    "main": "./dist/index.cjs",
-    "module": "./src/index.js",
+    "main": "./dist/cjs/index.js",
+    "module": "./dist/esm/index.js",
+    "types": "./dist/cjs/index.d.ts",
     "exports": {
         ".": {
-            "types": "./src/index.d.ts",
-            "import": "./src/index.js",
-            "require": "./dist/index.cjs"
+            "import": "./dist/esm/index.js",
+            "require": "./dist/cjs/index.js"
         },
-        "./model/*": "./model/*"
+        "./model/*": "./model/*",
+        "./package.json": "./package.json"
     },
-    "types": "./src/index.d.ts",
     "files": [
-        "src",
         "dist",
         "model",
         "!model/keras_model.h5"
     ],
     "scripts": {
-        "build": "node build.js",
-        "test": "node --test test/test.js",
-        "test:coverage": "c8 npm test",
+        "build": "node scripts/build.js",
+        "typecheck": "tsc -p tsconfig.json",
+        "pretest": "npm run build",
+        "test": "node --import tsx --test $(find test -name '*.test.ts')",
+        "pretest:coverage": "npm run build",
+        "test:coverage": "c8 node --import tsx --test $(find test -name '*.test.ts')",
         "pretest:cjs": "npm run build",
-        "test:cjs": "NODE_OPTIONS=--no-experimental-require-module node test/cjs-smoke.cjs",
-        "lint": "eslint .",
+        "test:cjs": "NODE_OPTIONS=--no-experimental-require-module node test/package/cjs-smoke.cjs",
+        "lint": "npm run typecheck && eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "update-model": "node scripts/update-model.js",
         "update": "rm -rf node_modules package-lock.json && ncu -u && npm install",
-        "prepublishOnly": "npm run update-model && npm run build"
+        "prepare": "npm run build",
+        "prepublishOnly": "npm run update-model"
     },
     "devDependencies": {
-        "@eslint/js": "10.0.1",
+        "@types/node": "20.19.43",
         "c8": "12.0.0",
-        "esbuild": "0.28.2",
         "eslint": "10.13.0",
         "eslint-config-prettier": "10.1.8",
         "globals": "17.13.0",
-        "prettier": "3.9.10"
+        "prettier": "3.9.10",
+        "tsx": "4.23.15",
+        "typescript": "6.0.3",
+        "typescript-eslint": "8.71.2"
     },
     "engines": {
         "node": ">=20.0.0"

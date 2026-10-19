@@ -80,9 +80,11 @@ main();
 
 ### Browser Usage
 
+Serve the package's `dist/esm/` directory and `model/` directory from your site (both are in the npm package), then import the ES module build:
+
 ```html
 <script type="module">
-    import { classify, initialize } from './src/index.js';
+    import { classify, initialize } from './dist/esm/index.js';
 
     // Specify model path for browser
     await initialize({ modelPath: './model' });
@@ -266,8 +268,8 @@ Text-pattern fallbacks (and patterns added with `registerTextFallback()`) apply 
 The `example/` folder contains a browser demo. To run it:
 
 ```bash
-cd example
-npx serve ..
+npm run build
+npx serve .
 # Open http://localhost:3000/example/ in your browser
 ```
 

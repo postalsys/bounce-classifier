@@ -34,7 +34,7 @@ jobs:
             - name: Assemble site
               run: |
                   mkdir -p _site
-                  cp -r example src model _site/
+                  cp -r example dist model _site/
                   # Root of the Pages site redirects to the demo.
                   cat > _site/index.html <<'HTML'
                   <!doctype html>
