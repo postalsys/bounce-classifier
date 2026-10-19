@@ -1,5 +1,12 @@
+# Auto-generated files
 CHANGELOG.md
-dist/
+
+# Dependencies
 node_modules/
+package-lock.json
+
+# Build output and downloaded model
+dist/
+coverage/
 model/
 example/vendor/
