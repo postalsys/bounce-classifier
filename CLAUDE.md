@@ -12,6 +12,7 @@ npm run lint:fix          # eslint . --fix
 npm run format            # prettier --write .
 npm run format:check      # prettier --check .
 npm run build             # esbuild: src/index.js -> dist/index.cjs (CommonJS bundle)
+npm run test:cjs          # build, then load dist/index.cjs with require(esm) disabled (needs the model)
 npm run update-model      # download the latest model from bounces.postalsys.com into model/
 npm run update            # rm -rf node_modules package-lock.json && ncu -u && npm install
 ```
@@ -36,9 +37,18 @@ A single ESM module, `src/index.js`, that classifies SMTP bounce text into 16 la
 
 ## Critical constraints
 
-- **EmailEngine consumes the CommonJS build.** `../emailengine/server.js` does `require('@postalsys/bounce-classifier')` (so it gets `dist/index.cjs`), calls `initialize()` at startup and `classify()` per bounce, and its `pkg` config ships `node_modules/@postalsys/bounce-classifier/model/**/*` as assets. Keep the `require` export working, keep the model in `model/` next to `dist/`, keep the Node built-ins loadable without dynamic `import()` in the bundle, and do not add runtime dependencies (especially ESM-only or native ones). CI smoke-tests the bundle after `npm run build`.
+- **EmailEngine consumes the CommonJS build.** `../emailengine/server.js` does `require('@postalsys/bounce-classifier')` (so it gets `dist/index.cjs`), calls `initialize()` at startup and `classify()` per bounce, and its `pkg` config ships `node_modules/@postalsys/bounce-classifier/model/**/*` as assets. Keep the `require` export working, keep the model in `model/` next to `dist/`, keep the Node built-ins loadable without dynamic `import()` in the bundle, and do not add runtime dependencies (especially ESM-only or native ones). See Platform constraints below.
 - **Browser compatibility.** `src/index.js` must keep running in the browser: Node modules are loaded lazily and only when `isBrowser` is false.
 - **Releases are automated via release-please.** Version in `package.json` and `CHANGELOG.md` are owned by the bot; do not bump them by hand. The publish job downloads the latest model and builds before `npm publish`, so each release ships whatever model the trainer serves at that moment.
+
+## Platform constraints
+
+Both rules come from EmailEngine, which ships as a `@yao-pkg/pkg` binary: pkg snapshots a CommonJS module graph and cannot load ES modules.
+
+- **Node.js 20 is the minimum supported version.** Runtime code, tests and tooling must work on Node 20, 22 and 24 (`engines.node` is `>=20.0.0`, and `build.js` targets `node20`).
+- **What EmailEngine loads must be genuinely CommonJS.** The source is ESM by design; what reaches the binary is `dist/index.cjs` plus `model/**`. The esbuild bundle has to inline everything, so at runtime it `require()`s Node built-ins only and contains no dynamic `import()`. Node 22+ (and 20.19) can `require()` an ES module by default, which would hide a regression until the pkg binary fails. A CommonJS entry that only wraps a dynamic `import()` does not count.
+- **Check:** `npm run test:cjs` builds, then `test/cjs-smoke.cjs` requires the package by name with `NODE_OPTIONS=--no-experimental-require-module`, asserts the bundle loads only built-ins, and classifies a sample bounce. CI runs it on Node 22 and 24 (Node 20 loads the bundle without the flag).
+- Never add an ESM-only runtime dependency (ideally none at all). If a dev dependency's next major is ESM-only or needs more than Node 20, pin the last working major in `.ncurc.js` (`reject`, or a `target` of `minor`/`patch`) with a comment giving the reason.
 
 ## Conventions
 
@@ -59,7 +69,7 @@ These mirror the conventions used across Postal Systems projects (see `../emaile
 **Before committing code changes**
 
 1. `npm run format` and `npm run lint`
-2. `npm test` (and `npm run build` if `src/` or `build.js` changed, then load `dist/index.cjs` with `require()`)
+2. `npm test` (and `npm run test:cjs` if `src/` or `build.js` changed)
 3. For non-trivial changes, consider `/simplify` and `/security-review`.
 
 **After pushing**
